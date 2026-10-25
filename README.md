@@ -58,7 +58,7 @@ Not in the repository, never:
 Linux x86-64, about 12 GB of disk, 7-Zip 23 or newer, `lz4`, `qemu-system-aarch64`, `edk2-aarch64`.
 
 ```sh
-git clone https://github.com/oosexgang/hakios-os.git hakios
+git clone https://github.com/oosexgang/hackios-xnu-kernel hakios
 cd hakios
 sysimage/fetch.sh             # the iOS 16.5 IPSW from Apple's servers, the needed parts unpacked (7.4 GB)
 REST=1 userland/build.sh      # the APFS images: userland/root.apfs and userland/system.apfs
