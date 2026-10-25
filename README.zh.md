@@ -53,7 +53,7 @@ HakiOS 在搭载高通 SoC 的 Android 手机上运行开源的 XNU 内核（xnu
 Linux x86-64，约 12 GB 磁盘，7-Zip 23 或更新，`lz4`，`qemu-system-aarch64`，`edk2-aarch64`。
 
 ```sh
-git clone https://github.com/oosexgang/hakios-os.git hakios
+git clone https://github.com/oosexgang/hackios-xnu-kernel hakios
 cd hakios
 make fetch        # 从 Apple 服务器取 iOS 16.5 IPSW，解包所需部分（7.4 GB）
 make images       # APFS 镜像：userland/root.apfs 和 userland/system.apfs
