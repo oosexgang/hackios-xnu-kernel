@@ -129,6 +129,7 @@ owners:
 @netusd - adversting / ceo-dev
 @wannqn - dev 
 @hxfuxyyXD - dev
+@wryzzew - dev
 Rhaenja Hun（杭润嘉） — Developer / Sponsor
 
 tym sicilium for the sources!
