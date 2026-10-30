@@ -66,8 +66,18 @@ dst = os.open(sys.argv[2], os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o644)
 offset, size = int(sys.argv[3]), int(sys.argv[4])
 os.ftruncate(dst, size)
 total, done = os.fstat(src).st_size, 0
-while done < total:
-    done += os.copy_file_range(src, dst, total - done, done, offset + done)
+# os.copy_file_range is Linux-only; on a macOS host it is not there at all, so fall back to
+# reading and writing the same bytes. The destination is already the right size and sparse.
+if hasattr(os, "copy_file_range"):
+    while done < total:
+        done += os.copy_file_range(src, dst, total - done, done, offset + done)
+else:
+    os.lseek(dst, offset, os.SEEK_SET)
+    while done < total:
+        chunk = os.read(src, 8 << 20)
+        if not chunk:
+            break
+        done += os.write(dst, chunk)
 PY
 fi
 NET=()
