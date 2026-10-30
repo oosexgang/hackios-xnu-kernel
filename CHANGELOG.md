@@ -18,6 +18,10 @@ changes to it; the scripts named fetch the release and put the changes on.
 
 ## 2026-10-30
 
+- branch `mtk`: the Infinix Hot 20 whole -- `mtk/loader/` (mtkloader) and `mtk/tools/` from the device's repository; `make loader`, `make payload`, `make boot-image`, `make phone` and `make system-flash` do the MediaTek phone's (DEVICE=x6826b by default); the README is the phone's
+- mtk: this tree's kernel booted on the phone (runs 359, 360): six MediaTek drivers built in, the root off the eMMC, the Mali up, launchd, the home screen drawn (by the processor: the user space there still has the former names)
+- mtk: the loader passes the payload's `kernel.ver` to the kernel as `hakios_kver=`
+- provenance: `mtk/` is scanned, and `fastboot -s SERIAL flash` is a write like `fastboot flash`; the MediaTek scripts that write `boot_a` and `xnusys` are declared
 - mediatek: `mtk/`, the MediaTek part of the tree, and `mtk/mt6768/`, the Helio G85's SoC layer: its eMMC (read only, the root with `emmc_root=1`), keypad and clocks, the SCP's accelerometer, the Mali-G52 and CONNSYS as drivers `CONFIG_HAKIOS_MTK_*`, `MALI`, `TCM` (`default n`); `make x6826b_defconfig && make kernel` builds the Infinix Hot 20's kernel ([mtk/README.md](mtk/README.md))
 - display: `fbfit=`, `fb_flip=1`, `fbshot=`, `fb_inuse=1`, `fb_flicker=1`, `fbxr=1` (from the MediaTek port); IOSurface: `surf_align=1`, `surf_lockwait=1` -- all off unless asked for, the POCO's defaults unchanged
 - boot: the loader's second RAM disk is `md1` even when there is no `md0`

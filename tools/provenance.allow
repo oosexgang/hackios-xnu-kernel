@@ -31,3 +31,9 @@ flash    tools/darwin-write.py                    writes an image into `darwin` 
 flash    tools/backup-partitions.py               WRITES NOTHING to the phone (only ls, blockdev, dd if= and sha256sum, as root, over adb); it is declared because the restore notes it writes for a person (restore.txt) contain the fastboot lines that would put each partition back, which the scan cannot tell from a command to run
 flash    tools/backup-partitions-test.py          the same tool's test, against a stand-in adb: the text it checks for is those notes
 flash    tools/userdata-carve.py                 prints the dd commands that cut the `darwin` partition off the end of Android's userdata (a new GPT); a person runs them once, by hand, under Android, and only for the optional persistence; the default run needs no such partition
+# the MediaTek phone (mtk/README.md): its loader lives in boot_a, its system image in a partition of its own
+flash    mtk/tools/xnu-cycle.sh                   one run on the Infinix Hot 20 (make phone): writes boot_a, only after checking that the phone (HAKIOS_SERIAL) is in fastboot and its current slot is a; never slot b, never another partition
+flash    mtk/tools/system-flash.sh                writes the system image into the partition `xnusys` (from Android, as root) and reads its first block back; `xnusys` is cut once from the end of userdata (mtk/tools/gpt-carve.py)
+flash    mtk/tools/gpu-probe.sh                   a probe of the loader's: writes boot_a with a loader built for that probe, after the same checks as xnu-cycle.sh
+flash    mtk/tools/touch-probe.sh                 the same, for the touch controller
+flash    mtk/tools/msdc-test.sh                   the same, for the eMMC's read path

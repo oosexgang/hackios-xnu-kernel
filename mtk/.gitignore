@@ -1,0 +1,6 @@
+# what mtk/loader/build.sh makes: the loader, its objects, and the two headers that are not ours to keep (the touch
+# controller's firmware out of your phone, the font rasterized on your Mac)
+loader/*.o
+loader/*.bin
+loader/touchfw.h
+loader/font8x16.h

@@ -7,7 +7,9 @@ Nothing here is shared with the Qualcomm layers, and nothing of a Qualcomm phone
 
 ```
 mtk/
-└── mt6768/                      the MT6768 (Helio G85) SoC layer: soc.conf, configs/mt6768.config, drivers/
+├── mt6768/                      the MT6768 (Helio G85) SoC layer: soc.conf, configs/mt6768.config, drivers/
+├── loader/                      mtkloader: runs in boot_a in front of Android's kernel and starts XNU once (make loader)
+└── tools/                       chainboot.py, xnu-cycle.sh (make phone), boot-xnu.sh, system-flash.sh, probes, log readers
 ```
 
 `mtk/<soc>/` is a SoC layer of the same shape as `socs/<soc>/` and a device's `soc/` ([How the repositories
@@ -45,11 +47,14 @@ make x6826b_defconfig                   # common_defconfig + mt6768.config + x68
 make kernel                             # hakios-kernel, with "mali mtk_keys mtk_scp tcm mtk_emmc mtk_connsys" built in
 ```
 
-The kernel boots through the device's own loader, which sits in `boot_a` in front of Android's kernel and starts XNU once when
-Android asks for it; the loader and the scripts that build `boot_a` and run the phone are in the device repository.
+The kernel boots through `mtk/loader/` (mtkloader), which sits in `boot_a` in front of Android's kernel and starts XNU once when
+Android asks for it (`mtk/tools/boot-xnu.sh`); `make boot-image` puts the two together with the payload (`make payload`: the
+kernel and its RAM disk) in your rooted boot image, and `make phone` writes it to `boot_a`, runs the phone once and brings the log
+back (the branch `mtk`'s Makefile; the top README has the steps).
 
 ## Not here yet
 
 - The user space for the Mali (Mesa's panfrost over `HakiosMali`, the Metal driver) is not in this tree's `userland/`; the one
-  that runs on the x6826b still reads the project's former names (`kern.redwood.*`, `RedwoodMali`).
-- The loader (`mtkloader`) lives in the device repository, and assumes that device's panel and touch controller.
+  that runs on the x6826b still reads the project's former names (`kern.redwood.*`, `RedwoodMali`, `/dev/redwood-touch`). On this
+  tree's kernel it draws the home screen on the processor (runs 359, 360).
+- The loader knows the x6826b's panel (720 x 1640, LK's framebuffer) and touch controller; another MT6768 phone changes those.

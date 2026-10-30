@@ -43,14 +43,16 @@ NEVER_PATH = re.compile(r"cryptex|dyld_shared_cache|\.ipsw|SpringBoard\.app|(^|/
 HEXLINE = re.compile(r"^\s*(0x[0-9a-fA-F]{2},\s*){8,}")
 HEX_LINES_LIMIT = 200
 # commands that write to a phone's storage; the project's scripts must not contain them
-FLASHY = re.compile(r"fastboot\s+(flash|erase|format|flashing|oem\s+unlock|oem\s+lock|set_active)\b|"
+# (with the options a script puts before the command too: fastboot -s SERIAL flash ...)
+FLASHY = re.compile(r"fastboot(\s+-{1,2}[A-Za-z][\w-]*(\s+(?!flash\b|erase\b|format\b)[^\s|;&]+)?)*\s+"
+                    r"(flash|erase|format|flashing|oem\s+unlock|oem\s+lock|set_active)\b|"
                     r"\bdd\s+[^|;&\n]*of=/dev/(block|mmcblk|sd[a-z]|nvme)|\bmke2fs\b.*\b/dev/|"
                     r"\badb\s+(shell\s+)?(su\s+-c\s+)?['\"]?(flash_image|erase_image|blkdiscard)")
 # ... and in C: the loader's write to a block device, and the kernel's UFS driver's. Both are limited in code to
 # the partitions named in the `flash` lines of tools/provenance.allow, and both are declared there.
 FLASHY_C = re.compile(r"\bwrite_blocks\s*\(|\bBLOCK_OP_WRITE\b")
 C_WRITERS = re.compile(r"^(xnuloader/[^/]+|drivers/storage/hakios\.ufs[^/]*)\.c$")
-SCRIPT_DIRS = ("tools/", "devices/", "qemu/", "sysimage/", "xnuloader/", "userland/build.sh")
+SCRIPT_DIRS = ("tools/", "devices/", "qemu/", "sysimage/", "xnuloader/", "userland/build.sh", "mtk/")
 SCRIPT_FILES = ("xl", "Makefile", "xnu-build.sh")
 # this file, its test and the doctor mention these commands in order to look for them (the test has them as data)
 SKIP_SCAN = {"tools/provenance-check.py", "tools/provenance-test.py", "tools/doctor.sh"}
