@@ -15,6 +15,8 @@
 #                          kernel gets the same 4.2 GB window (the system image included) as on the phone.
 #                          The host needs about 2.5 GB per running instance.
 #      QEMU_NET=1          with a network: a virtio network device, behind it QEMU's own "user" network
+#      QEMU_HOSTFWD        with QEMU_NET, a port of the host to forward into the guest, in QEMU's own
+#                          notation: QEMU_HOSTFWD=tcp:127.0.0.1:22087-:22087
 #                          (it hands out an address by DHCP, answers DNS and passes connections on to
 #                          this machine's network; no privileges needed). The kernel makes en0 of it
 #                          (boot-arg virtio_net=1, added here); see userland/src/net_test.m for the rest.
@@ -82,7 +84,12 @@ PY
 fi
 NET=()
 if [ -n "$QEMU_NET" ] && [ "$QEMU_NET" != 0 ]; then
-	NET=(-netdev user,id=net0 -device virtio-net-device,netdev=net0)
+	# QEMU_HOSTFWD=tcp:127.0.0.1:22087-:22087 forwards a port on the host to the same port in the
+	# guest, which is how anything on the host reaches a server running inside it. QEMU's "user"
+	# network has no route in otherwise. The guest needs its address first: etc/rc.jobs runs
+	# "net_test dhcp en0", because configd builds no service for an interface with no IOKit object
+	# behind it.
+	NET=(-netdev "user,id=net0${QEMU_HOSTFWD:+,hostfwd=$QEMU_HOSTFWD}" -device virtio-net-device,netdev=net0)
 	CMDLINE="virtio_net=1 $CMDLINE"
 fi
 # the sound device (QEMU 8.2 or newer has one for this machine): the kernel's sink for /dev/hakios-audio
