@@ -79,9 +79,16 @@ def main():
         if props and 'reg' in props and len(props['reg']) >= (cell + 1) * 4:
             args.append((arg, u32(props['reg'], cell)))
 
-    block('qcom,ipcc', 'soc_ipcc')                      # cell 0: the address
+    block('qcom,ipcc', 'soc_ipcc')                      # cell 0: the address (SDM845 and older have none: the APCS mailbox instead)
     block('qcom,sm8350-aoss-qmp', 'soc_aoss')           # the AOSS mailbox (its compatible varies by SoC)
+    if not any(name == 'soc_aoss' for name, _ in args):
+        block('qcom,qmp-mbox', 'soc_aoss')              # SDM845's downstream tree: the AOP mailbox, cell 0 its message RAM
     block('qcom,rpmh-rsc', 'soc_rsc', cell=4)           # drv-2 (the application processors') is the third addr/size pair (reg-names drv-0/1/2)
+    if not any(name == 'soc_rsc' for name, _ in args):
+        for path, props in nodes.items():               # SDM845's downstream tree: one qcom,tcs-drv node per DRV, the apps one is drv-id 2
+            if b'qcom,tcs-drv' in props.get('compatible', b'').split(b'\0') and u32(props.get('qcom,drv-id', b'\0' * 4)) == 2:
+                args.append(('soc_rsc', u32(props['reg'], 0)))
+                break
     _, smmu = find_named(nodes, 'apps-smmu')            # not by compatible: the GPU's SMMU shares qcom,qsmmu-v500
     if smmu and 'reg' in smmu:
         args.append(('soc_apps_smmu', u32(smmu['reg'], 0)))
@@ -96,17 +103,23 @@ def main():
 
     def reserved(leaf, arg):
         _, props = find_named(nodes, leaf)
+        if not props or 'reg' not in props:
+            _, props = find_named(nodes, leaf + '_region')  # SDM845's downstream tree: modem_region@..., ipa_gsi_region@...
         if props and 'reg' in props:
             args.append((arg, u32(props['reg'], 1)))    # reserved-memory: 2 address cells, so the low word is cell 1
 
     reserved('cmd_db', 'soc_cmd_db')
     reserved('mpss', 'soc_mpss_mem')
+    if not any(name == 'soc_mpss_mem' for name, _ in args):
+        reserved('modem', 'soc_mpss_mem')
     reserved('ipa_gsi', 'modem_ipa_fw_at')              # where the IPA's firmware is loaded (the ipa_gsi reservation)
     _, smem = find(nodes, 'qcom,smem')
     if smem and 'memory-region' in smem:
         target = by_phandle.get(u32(smem['memory-region']))
         if target and 'reg' in target[1]:
             args.append(('soc_smem', u32(target[1]['reg'], 1)))
+    elif smem and 'reg' in smem:                        # SDM845's downstream tree: the node's own first reg is shared memory
+        args.append(('soc_smem', u32(smem['reg'], 0)))
     _, imem = find(nodes, 'qcom,msm-imem')
     if imem and 'reg' in imem:
         args.append(('soc_imem', u32(imem['reg'], 0) & ~0x1fffff))   # the 2 MB block that holds it

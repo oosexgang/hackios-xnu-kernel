@@ -8,8 +8,9 @@ PATH=$PWD/tools/macos-bin/platform-tools:$PWD/tools/macos-bin:$PATH
 ARGS=$1; SECS=${2:-300}
 # A port's SoC addresses (devices/<name>/soc.args, made by devices/<name>/pull-soc.sh): added to the
 # kernel command line so hakios.mpss.c / hakios.ipa.c map that phone's blocks. SOC_ARGS names the file;
-# default is the one device there is. The POCO's values equal the kernel defaults, so this is a no-op there.
-SOC_ARGS=${SOC_ARGS-$(ls devices/*/soc.args 2>/dev/null | head -1)}
+# default is DEVICE's (as in the Makefile; poco-x5-pro), not whichever devices/*/ sorts first. The POCO's values equal
+# the kernel defaults, so this is a no-op there.
+SOC_ARGS=${SOC_ARGS-devices/${DEVICE:-poco-x5-pro}/soc.args}
 SOC=""; [ -n "$SOC_ARGS" ] && [ -f "$SOC_ARGS" ] && SOC=$(tr '\n' ' ' < "$SOC_ARGS")
 for i in $(seq 1 2160); do s=$(./xl state); [ "$s" != absent ] && break; sleep 10; done
 echo "$(date +%T) phone: $s"; [ "$s" = absent ] && { echo "NO PHONE"; exit 1; }

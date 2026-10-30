@@ -27,9 +27,13 @@ APP_CRYPTEX_DMG=096-03536-083.dmg               # the App cryptex (BuildManifest
 CACHE=20F66__iPhone10,3_6
 UNZBM=../xnu-deps/host/bin/unzbm
 
-for tool in python3 7z cc; do
+for tool in python3 cc; do
 	command -v $tool >/dev/null || { echo "fetch.sh: $tool is not installed"; exit 1; }
 done
+# 7-Zip 23 or newer: 7-Zip's own build is 7zz, and a distribution's 7z may be p7zip 16.02 (Ubuntu 22.04's), which cannot read APFS
+SZ=$(command -v 7zz || command -v 7z) || { echo "fetch.sh: 7-Zip is not installed (7zz from 7-zip.org, 23 or newer)"; exit 1; }
+sz_version=$("$SZ" 2>&1 | sed -n 's/^7-Zip[^0-9]*\([0-9][0-9]*\)\..*/\1/p' | head -1)
+[ "${sz_version:-0}" -ge 23 ] || { echo "fetch.sh: $SZ is 7-Zip ${sz_version:-of an unknown version}; 23 or newer is needed (7zz from 7-zip.org)"; exit 1; }
 # 7z leaves files compressed with LZBITMAP as an empty file and two attribute files; unzbm finishes them
 if [ ! -x $UNZBM ]; then
 	mkdir -p "$(dirname $UNZBM)"
@@ -50,12 +54,12 @@ if [ ! -f .done-rootfs ] || [ select-system.py -nt .done-rootfs ]; then
 		mv rootfs.dmg.part rootfs.dmg
 	fi
 	echo "fetch.sh: listing the image"
-	7z l -slt rootfs.dmg > rootfs.slt
+	"$SZ" l -slt rootfs.dmg > rootfs.slt
 	python3 select-system.py rootfs.slt system.files system.manifest
 	python3 mkvarskel.py rootfs.slt > var.skel
 	echo "fetch.sh: extracting $(wc -l < system.files) files"
 	rm -rf rootfs
-	7z x -y -orootfs rootfs.dmg @system.files > extract-system.log
+	"$SZ" x -y -orootfs rootfs.dmg @system.files > extract-system.log
 	# the two fonts too big for the image as they are, made smaller in place (see select-system.py)
 	python3 ../tools/font_trim.py emoji rootfs/System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc \
 		rootfs/System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc 40,64,96
@@ -75,10 +79,10 @@ if [ ! -f .done-cryptex ]; then
 	echo "fetch.sh: extracting the cryptex"
 	rm -rf cryptex cryptex.cache $CACHE
 	# 7z reports every LZBITMAP file as an error ("Unsupported Method"): expected, unzbm_all checks the result
-	7z x -y -ocryptex cryptex-os.dmg '-xr!com.apple.dyld' '-x!System/DriverKit' > extract-cryptex.log 2>&1 || true
+	"$SZ" x -y -ocryptex cryptex-os.dmg '-xr!com.apple.dyld' '-x!System/DriverKit' > extract-cryptex.log 2>&1 || true
 	unzbm_all cryptex
 	# the dyld shared cache; its .symbols file (0.6 GB) is never mapped and is left out
-	7z x -y -ocryptex.cache cryptex-os.dmg System/Library/Caches/com.apple.dyld '-xr!*.symbols*' > extract-dyld.log 2>&1 || true
+	"$SZ" x -y -ocryptex.cache cryptex-os.dmg System/Library/Caches/com.apple.dyld '-xr!*.symbols*' > extract-dyld.log 2>&1 || true
 	unzbm_all cryptex.cache
 	mv cryptex.cache/System/Library/Caches/com.apple.dyld $CACHE
 	rm -rf cryptex.cache
@@ -98,7 +102,7 @@ if [ ! -f .done-cryptex-app ]; then
 	fi
 	echo "fetch.sh: extracting the App cryptex"
 	rm -rf cryptex-app
-	7z x -y -ocryptex-app cryptex-app.dmg > extract-cryptex-app.log 2>&1 || true
+	"$SZ" x -y -ocryptex-app cryptex-app.dmg > extract-cryptex-app.log 2>&1 || true
 	unzbm_all cryptex-app
 	[ -f cryptex-app/usr/libexec/webbookmarksd ] || { echo "fetch.sh: the App cryptex is incomplete"; exit 1; }
 	touch .done-cryptex-app

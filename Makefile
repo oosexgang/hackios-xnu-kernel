@@ -42,6 +42,7 @@ images:
 kernel:
 	[ -d xnu-src/xnu-8796.121.2 ] || xnu/apply.sh
 	[ -x xnu-deps/host/bin/xnu-clang ] || xnu-deps/setup.sh
+	xnu-deps/setup.sh --stage2      # the kernel's static libraries (libfirehose_kernel, libpthread_kext); no-op once made
 	./xnu-build.sh -j$(JOBS) -k
 
 loader:
@@ -75,7 +76,7 @@ qemu-open: kernel loader-open hello
 	qemu/run.sh $(SECS) | tee logs/qemu-open.log
 
 phone:
-	XL_SB_DELAY=8 tools/modem-cycle.sh "$(ARGS)" $(SECS)
+	DEVICE=$(DEVICE) XL_SB_DELAY=8 tools/modem-cycle.sh "$(ARGS)" $(SECS)
 
 prebuilt:
 	tools/update-prebuilt.sh

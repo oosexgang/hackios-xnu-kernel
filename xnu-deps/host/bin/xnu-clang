@@ -3,16 +3,21 @@
 #  - forces an Apple Mach-O target (stock Linux clang defaults to ELF)
 #  - drops flags only Apple's clang understands
 #  - links with the cctools ld64
+#  - takes the newest clang installed as clang-N (Ubuntu 22.04's own clang is 14; clang-15 is a package), and keeps
+#    -enable-trivial-auto-var-init-zero-... below clang 16, which needs it for -ftrivial-auto-var-init=zero (16 and up reject it)
 HB="$(cd "$(dirname "$0")" && pwd)"
 case "$(basename "$0")" in *++) drv=clang++; extra=(-fno-use-cxa-atexit);; *) drv=clang; extra=();; esac
+cc=/usr/bin/$drv
+for v in 20 19 18 17 16 15; do [ -x /usr/bin/$drv-$v ] && { cc=/usr/bin/$drv-$v; break; }; done
+major=$("$cc" -dumpversion); major=${major%%.*}
 args=()
 for a in "$@"; do
   case "$a" in
-    -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang) ;;
+    -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang) [ "$major" -lt 16 ] && args+=("$a");;
     -fapple-kext-vtable-verify|-Wno-vla-cxx-extension) ;;
     -Werror|-Werror=*|-Weverything|-pedantic-errors) ;;
     *) args+=("$a");;
   esac
 done
-exec /usr/bin/$drv -include "$HB/../../hostinc/xnu_clang_compat.h" -target arm64-apple-ios${XNU_SDK_VERSION:-16.5} --ld-path="$HB/ld64" \
+exec "$cc" -include "$HB/../../hostinc/xnu_clang_compat.h" -target arm64-apple-ios${XNU_SDK_VERSION:-16.5} --ld-path="$HB/ld64" \
   -w "${extra[@]}" "${args[@]}"

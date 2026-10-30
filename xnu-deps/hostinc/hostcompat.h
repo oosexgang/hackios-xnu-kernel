@@ -56,6 +56,23 @@ static inline void *setmode(const char *s) {
 	mode_t *m = malloc(sizeof *m); *m = (mode_t)v; return m;
 }
 static inline mode_t getmode(const void *set, mode_t omode) { (void)omode; return *(const mode_t *)set; }
+/* BSD strlcpy/strlcat: glibc has them from 2.38 (Ubuntu 22.04 has 2.35); SETUP/replacecontents uses strlcat */
+#if defined(__GLIBC__) && !__GLIBC_PREREQ(2, 38)
+static inline size_t strlcpy(char *dst, const char *src, size_t size) {
+	size_t len = strlen(src);
+	if (size != 0) {
+		size_t n = len < size - 1 ? len : size - 1;
+		memcpy(dst, src, n);
+		dst[n] = '\0';
+	}
+	return len;
+}
+static inline size_t strlcat(char *dst, const char *src, size_t size) {
+	size_t dlen = strnlen(dst, size);
+	if (dlen == size) return size + strlen(src);
+	return dlen + strlcpy(dst + dlen, src, size - dlen);
+}
+#endif
 #ifndef O_EXLOCK
 #define O_EXLOCK 0
 #endif

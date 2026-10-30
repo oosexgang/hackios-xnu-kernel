@@ -1,0 +1,14 @@
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = ConfigurationMapLib
+  FILE_GUID                      = D7DDE228-62E4-43E3-B5A1-AB29FB9B0A35
+  MODULE_TYPE                    = BASE
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = ConfigurationMapLib
+
+[Sources]
+  ConfigurationMapLib.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  QcomPkg/QcomPkg.dec

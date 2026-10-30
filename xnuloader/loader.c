@@ -524,6 +524,8 @@ struct platform {
 	int core_shift;                  /* ... in this bit of MPIDR: the phone numbers them in the second affinity field */
 	uint32_t timeout_scale;          /* a kernel on several cores gets this much longer to wait for a lock, 0: as it is */
 	uint32_t small_cores;            /* a bit for each of the slower cores, by number: "small-core" in the device tree */
+	int usb_old_driver;              /* its UEFI's USB driver repeats "connected" each time the host opens the device, and
+	                                    may not say it at all for a cable that was in from the start (usb_wait) */
 };
 
 static const struct platform platform_qemu_virt = {
@@ -549,6 +551,24 @@ static const struct platform platform_redwood = {
 	 * (XNU's machine_routines.c, ml_choose_slow_core_partners()).
 	 */
 	.small_cores = 0x0f,
+};
+
+static const struct platform platform_fajita = {
+	/*
+	 * The OnePlus 6T (SDM845): the GICv3 is where redwood's is and the cores are numbered the same
+	 * way (cpu@0 ... cpu@700 in its device tree). Cores 0-3 are Kryo 385 Silver (1.77 GHz),
+	 * 4-7 Kryo 385 Gold (2.8 GHz).
+	 */
+	.name = "fajita", .io_base = 0x00400000, .io_size = 0x3FC00000,
+	.gic_dist = 0x17A00000, .gic_redist = 0x17A60000, .uart = 0, .log_other_cpu = 1,
+	.cores = 8, .core_shift = 8,
+	.small_cores = 0x0f,
+	/*
+	 * Its UEFI runs the OnePlus 6's USB driver (Mu-Silicium's Binaries/enchilada). Taking each of
+	 * its repeated "connected" events as a new cable dropped the receive in flight and queued a
+	 * second one, and every other command from the host was lost.
+	 */
+	.usb_old_driver = 1,
 };
 
 /* ------------------------------------------------------------------------ */
@@ -3495,11 +3515,16 @@ usb_start(void)
  * Returns the byte count, or -1 if the transfer was cancelled or the cable
  * state changed. Keeps the watchdog fed while idle.
  */
+static int usb_rx_queued;       /* usb_poll_command() has left the receive for the next command with the controller */
+static int usb_rx_pending;      /* usb_rx() has a receive with the controller that has not completed (PLAT->usb_old_driver) */
+static int usb_tx_cancel_due;   /* a send was aborted and the driver has yet to say so (PLAT->usb_old_driver) */
+
 static int64_t
 usb_wait(uint8_t endpoint)
 {
 	/* static: a long transfer is many short waits, and the watchdog must be fed across them */
-	static uint64_t last_pet;
+	static uint64_t last_pet, last_event;
+	static int usb_log_unsaved;     /* the USB lines in the log are not in logdump yet (PLAT->usb_old_driver) */
 	uint64_t freq = READ_SYSREG(CNTFRQ_EL0), began = READ_SYSREG(CNTVCT_EL0);
 
 	for (;;) {
@@ -3508,6 +3533,64 @@ usb_wait(uint8_t endpoint)
 		usb_device_event_data data;
 
 		USB->handle_event(&msg, &size, &data);
+		if (PLAT->usb_old_driver) {
+			static int told, told_state;    /* what the driver says, the first few times */
+			if (msg == UsbDeviceEventDeviceStateChange && told_state < 32) {
+				told_state++;
+				print("usb: waiting on %x: cable %s (receive %s)\n", (uint64_t)endpoint,
+				    data.device_state == UsbDeviceStateConnected ? "connected" : "DISCONNECTED",
+				    usb_rx_pending ? "pending" : "none");
+				usb_log_unsaved = 1;
+			} else if (msg != UsbDeviceEventNoEvent && told < 48) {
+				told++;
+				print("usb: waiting on %x: event %d size %d data %x %x\n", (uint64_t)endpoint, (uint64_t)msg, size,
+				    data.raw[0], data.raw[1]);
+				usb_log_unsaved = 1;
+			}
+			/*
+			 * Into logdump, should the conversation stop here -- but only after 2 s without a word from
+			 * the driver: it is polled, and a write to storage while the host sets the device up starves
+			 * the host's requests (a loader that saved on every event never came up).
+			 */
+			if (msg != UsbDeviceEventNoEvent) {
+				last_event = READ_SYSREG(CNTVCT_EL0);
+			} else if (usb_log_unsaved && READ_SYSREG(CNTVCT_EL0) - last_event > 2 * freq) {
+				usb_log_unsaved = 0;
+				flush_log();
+			}
+			if (msg == UsbDeviceEventTransferNotification && data.transfer.endpoint_index == USB_EP_IN &&
+			    data.transfer.status == UsbDeviceTransferStatusCancelled && usb_tx_cancel_due) {
+				usb_tx_cancel_due = 0;  /* the aborted send's own end, not the one being waited for */
+				continue;
+			}
+			if (msg == UsbDeviceEventTransferNotification && data.transfer.endpoint_index == USB_EP_OUT) {
+				usb_rx_pending = 0;     /* whichever wait sees it: the receive is the controller's no more */
+			}
+			if (msg == UsbDeviceEventDeviceStateChange && data.device_state != UsbDeviceStateConnected) {
+				usb_rx_pending = 0;     /* a cable that went away takes the transfers with it */
+			}
+			/*
+			 * A reply this driver never reports done (seen: "oem log"'s, after two getvars had theirs):
+			 * waiting on for it kept every later command from being received. Cancel it and go on.
+			 */
+			if (endpoint == USB_EP_IN && msg == UsbDeviceEventNoEvent && READ_SYSREG(CNTVCT_EL0) - began > freq) {
+				print("usb: no completion for a send in 1 s: aborted\n");
+				usb_log_unsaved = 1;
+				USB->abort_xfer(USB_EP_IN);
+				usb_tx_cancel_due = 1;
+				return -3;
+			}
+			if (endpoint == 0xff && READ_SYSREG(CNTVCT_EL0) - began > 3 * freq) {
+				print("usb: no connect event in 3 s: taking the cable as connected\n");
+				flush_log();
+				usb_connected = 1;
+				return -1;
+			}
+			if (msg == UsbDeviceEventDeviceStateChange && data.device_state == UsbDeviceStateConnected &&
+			    usb_connected && endpoint != 0xff) {
+				continue;       /* connected again, as it was: the transfer in flight stays */
+			}
+		}
 		if (msg == UsbDeviceEventDeviceStateChange) {
 			usb_connected = (data.device_state == UsbDeviceStateConnected);
 			return -1;
@@ -3526,15 +3609,20 @@ usb_wait(uint8_t endpoint)
 	}
 }
 
-static int usb_rx_queued;       /* usb_poll_command() has left the receive for the next command with the controller */
-
 static int64_t
 usb_rx(uint8_t *buf, uint64_t len)
 {
 	if (usb_rx_queued) {
 		usb_rx_queued = 0;      /* (every command is received the same way, into the same buffer) */
+	} else if (PLAT->usb_old_driver && usb_rx_pending) {
+		/* the receive queued before is still the controller's: a second one beside it loses commands */
 	} else if (EFI_ERROR(USB->send(USB_EP_OUT, len, buf))) {
+		if (PLAT->usb_old_driver) {
+			usb_connected = 0;      /* taken as connected but refused: back to waiting, or this loop spins without events */
+		}
 		return -1;
+	} else {
+		usb_rx_pending = 1;
 	}
 	return usb_wait(USB_EP_OUT);
 }
@@ -3545,10 +3633,15 @@ usb_tx(const uint8_t *data, uint64_t len)
 	if (data != usb_tx_buf) {
 		memcpy(usb_tx_buf, data, len);
 	}
-	if (EFI_ERROR(USB->send(USB_EP_IN, len, usb_tx_buf))) {
+	efi_status s = USB->send(USB_EP_IN, len, usb_tx_buf);
+	if (PLAT->usb_old_driver && EFI_ERROR(s)) {
+		print("usb: send of %d bytes refused: %x\n", len, s);
+	}
+	if (EFI_ERROR(s)) {
 		return -1;
 	}
-	return usb_wait(USB_EP_IN);
+	int64_t n = usb_wait(USB_EP_IN);
+	return n == -3 ? -1 : n;        /* -3: aborted, never started (usb_wait) */
 }
 
 static void
@@ -3659,9 +3752,20 @@ fb_command(char *cmd)
 				return;
 			}
 			fb_reply_data(total);
+			if (PLAT->usb_old_driver) {
+				print("download: %x bytes, DATA sent\n", total);
+			}
+			/*
+			 * The old driver starts no reply after a receive of 29696 bytes or more (fajita: 29184 is
+			 * answered, 29696 never is, every time); the download's own OKAY is one. Smaller receives.
+			 */
+			uint64_t chunk = PLAT->usb_old_driver ? 16384 : USB_CHUNK;
 			while (got < total) {
-				uint64_t want = total - got > USB_CHUNK ? USB_CHUNK : total - got;
+				uint64_t want = total - got > chunk ? chunk : total - got;
 				int64_t r = usb_rx(usb_rx_buf, want);
+				if (PLAT->usb_old_driver && (got == 0 || r != (int64_t)want || got + want == total)) {
+					print("download: at %x asked %x got %x\n", got, want, (uint64_t)r);
+				}
 				if (r <= 0) {
 					break;
 				}
@@ -3675,6 +3779,9 @@ fb_command(char *cmd)
 				fb_reply("OKAY", "");
 			} else {
 				fb_reply("FAIL", "short download");
+			}
+			if (PLAT->usb_old_driver) {
+				print("download: %x of %x\n", got, total);
 			}
 		} else if (starts_with(cmd, "upload")) {
 			uint64_t sent = 0;
@@ -3745,12 +3852,22 @@ fb_command(char *cmd)
 			print_memory_map();
 			fb_reply("OKAY", "");
 		} else if (starts_with(cmd, "oem log")) {
+			/*
+			 * The OnePlus 6's USB driver never starts a reply queued ~4 ms after the command (composing
+			 * takes that long): the host has asked for it by then. So there the reply goes first; the
+			 * log is composed before the next command is read all the same.
+			 */
+			if (PLAT->usb_old_driver) {
+				fb_reply("OKAY", "");
+			}
 			if (busy) {
 				compose_live_log(running_live, running_slide);
 			} else {
 				compose_logs(NULL, 0);
 			}
-			fb_reply("OKAY", "");
+			if (!PLAT->usb_old_driver) {
+				fb_reply("OKAY", "");
+			}
 		} else if (starts_with(cmd, "reboot") || starts_with(cmd, "oem reboot")) {
 			fb_reply("OKAY", "");
 			BS->stall(200000);
@@ -3782,6 +3899,9 @@ usb_poll_command(void)
 	}
 	USB->handle_event(&msg, &size, &data);
 	if (msg == UsbDeviceEventDeviceStateChange) {
+		if (PLAT->usb_old_driver && data.device_state == UsbDeviceStateConnected && usb_connected) {
+			return;                 /* connected again, as it was (usb_wait): the queued receive stays */
+		}
 		usb_connected = (data.device_state == UsbDeviceStateConnected);
 		usb_rx_queued = 0;
 		return;
@@ -3932,6 +4052,8 @@ efi_main(efi_handle image, efi_system_table *st)
 		SCREEN.stride = GOP->mode->info->pixels_per_scanline * 4;
 		if (SCREEN.base == 0xE1000000ULL) {
 			PLAT = &platform_redwood;
+		} else if (SCREEN.base == 0x9D400000ULL) {
+			PLAT = &platform_fajita;        /* its device tree's cont_splash_region */
 		} else {
 			ramfb_phone_screen();
 		}

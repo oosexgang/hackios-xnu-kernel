@@ -21,6 +21,9 @@ case "$show" in
 esac
 if [ -n "$find" ]; then
   for d in "$HB" /usr/bin; do [ -x "$d/$find" ] && { echo "$d/$find"; exit 0; }; done
+  # Debian and Ubuntu install LLVM's tools as name-N (dsymutil-15): the newest; then whatever PATH has
+  for v in 20 19 18 17 16 15 14; do [ -x "/usr/bin/$find-$v" ] && { echo "/usr/bin/$find-$v"; exit 0; }; done
+  command -v "$find" && exit 0
   [ "$(uname)" = Darwin ] && exec /usr/bin/xcrun -find "$find"
   exit 1
 fi

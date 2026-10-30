@@ -1,0 +1,5 @@
+# HakiOS defconfig for the OnePlus 6T (fajita, SDM845, devices/oneplus-6t): the common kernel's configuration, the SDM845's
+# facts and this phone's own, put together as redwood_defconfig does.
+#include common_defconfig
+#include sdm845.config
+#include fajita.config

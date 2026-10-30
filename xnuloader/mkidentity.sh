@@ -36,7 +36,7 @@ decode() {
 	elif [ -x "$TOP/xnu-deps/host/bin/lzfse" ]; then "$TOP/xnu-deps/host/bin/lzfse" -decode -i "$1" -o "$2"
 	else
 		echo "mkidentity.sh: no LZFSE decoder: building lzfse (BSD, github.com/lzfse/lzfse) into xnu-deps/host/bin" >&2
-		git clone -q --depth 1 https://github.com/lzfse/lzfse "$WORK/lzfse" && make -s -C "$WORK/lzfse" lzfse >/dev/null &&
+		git clone -q --depth 1 https://github.com/lzfse/lzfse "$WORK/lzfse" && make -s -C "$WORK/lzfse" all >/dev/null &&
 			mkdir -p "$TOP/xnu-deps/host/bin" && cp "$WORK/lzfse/build/bin/lzfse" "$TOP/xnu-deps/host/bin/lzfse" &&
 			"$TOP/xnu-deps/host/bin/lzfse" -decode -i "$1" -o "$2"
 	fi

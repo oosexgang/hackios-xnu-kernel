@@ -81,6 +81,12 @@
 static vm_offset_t gicd_base, gicr_base;
 static vm_size_t   gicr_size;
 static vm_offset_t gicr_cpu_base[MAX_CPUS]; /* each processor's redistributor frame */
+/*
+ * The virtual timer's PPI: 27 where the SoC follows the architecture's suggestion (SC7280), but
+ * not everywhere -- the SDM845 wires its timers to PPIs 1, 2, 3, 0, the virtual one on intid 19,
+ * and a kernel waiting on 27 there sees no tick after the first. "soc_vtimer=N" (soc.args).
+ */
+static uint32_t gic_intid_vtimer = GIC_INTID_VTIMER;
 
 /*
  * Acknowledged, not yet EOI'd; 0: none. The signal between processors is interrupt 0 and reads
@@ -310,7 +316,7 @@ gic_irq_handler(__unused void *target, __unused void *refCon, __unused void *nub
 		}
 		gic_active_iar[cpu] = iar | GIC_IAR_TAKEN;
 
-		if (intid == GIC_INTID_VTIMER) {
+		if (intid == gic_intid_vtimer) {
 			/* same sequence as the FIQ path in sleh_fiq() */
 			getCpuDatap()->cpu_decrementer = -1; /* Large */
 			rtclock_intr(TRUE);
@@ -418,7 +424,13 @@ gic_v3_irq_cpu_init(void)
 {
 	int cpu = cpu_number();
 	vm_offset_t gicr;
-	uint32_t mine = 1u << GIC_INTID_VTIMER;
+	uint32_t mine;
+
+	if (gicd_base == 0 && PE_parse_boot_argn("soc_vtimer", &gic_intid_vtimer, sizeof(gic_intid_vtimer)) &&
+	    gic_intid_vtimer >= GIC_INTID_SPI_MIN) {
+		gic_intid_vtimer = GIC_INTID_VTIMER;    /* a PPI or nothing */
+	}
+	mine = 1u << gic_intid_vtimer;
 
 	if (gicd_base == 0) {
 		DTEntry entry;
@@ -476,7 +488,7 @@ gic_v3_irq_cpu_init(void)
 	/* Virtual timer PPI (and those): Group 1 (IRQ), default priority, enabled */
 	gic_write32(gicr + GICR_IGROUPR0, gic_read32(gicr + GICR_IGROUPR0) | mine);
 	gic_write32(gicr + GICR_IGRPMODR0, gic_read32(gicr + GICR_IGRPMODR0) & ~mine);
-	*(volatile uint8_t *)(gicr + GICR_IPRIORITYR(GIC_INTID_VTIMER)) = GIC_PRIORITY_DEFAULT;
+	*(volatile uint8_t *)(gicr + GICR_IPRIORITYR(gic_intid_vtimer)) = GIC_PRIORITY_DEFAULT;
 	gic_write32(gicr + GICR_ISENABLER0, mine);
 
 	/* Distributor: affinity routing, Group 1 enabled (normally already so) */
@@ -502,7 +514,7 @@ gic_v3_irq_cpu_init(void)
 
 	ml_install_interrupt_handler(NULL, 0, NULL, gic_irq_handler, NULL);
 	kprintf("gic: v3, distributor %p, cpu %d's redistributor %p, virtual timer on PPI %d\n",
-	    (void *)gicd_base, cpu, (void *)gicr, GIC_INTID_VTIMER);
+	    (void *)gicd_base, cpu, (void *)gicr, gic_intid_vtimer);
 }
 
 #endif /* GENERIC_GIC_V3_IRQ */

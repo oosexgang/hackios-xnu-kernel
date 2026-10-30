@@ -1,0 +1,5 @@
+# what came off this phone: its runtime device trees carry its serial number in /chosen, and the
+# UEFI image is a download; uefi/files/Resources/DTBs/fajita.dtb is the tree with /chosen emptied
+fdt
+device-tree.dtb
+uefi-fajita.img

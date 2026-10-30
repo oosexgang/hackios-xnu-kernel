@@ -77,6 +77,9 @@
 #                    the kernel's apfs_lib has to read every volume back as the directory it was made of
 #                    (../tools/apfs/check-image.sh; the system image takes a few minutes more)
 set -e
+# the images take each file's mode from here (mkapfs.py), and launchd refuses a plist that its group may
+# write ("Path had bad ownership/permissions", SpringBoard's among them): Ubuntu's umask 002 must not reach them
+umask 022
 cd "$(dirname "$(readlink -f "$0")")"
 source ../xnu-env.sh
 
@@ -392,7 +395,7 @@ if [ -d $IOS/rootfs/usr/lib ]; then
 fi
 # firmware of the phone's own hardware, where somebody has pulled it from the phone's Android into ../fw-gpu
 # (it is the vendor's and never in the repository): the kernel's GPU bring-up, bsd/dev/hakios.adreno.c, finds it in fw/
-if [ -d ../fw-gpu ]; then
+if [ -n "$(ls -A ../fw-gpu 2>/dev/null)" ]; then
 	mkdir -p root/fw
 	cp ../fw-gpu/* root/fw/
 fi
@@ -449,7 +452,7 @@ fi
 # loop there. Say what went in and what was not there to go in; what each one is for is above.
 fwhave= fwnone=
 for d in gpu wifi haptic camera audio; do
-	if [ -d ../fw-$d ]; then fwhave="$fwhave $d"; else fwnone="$fwnone $d"; fi
+	if [ -n "$(ls -A ../fw-$d 2>/dev/null)" ]; then fwhave="$fwhave $d"; else fwnone="$fwnone $d"; fi
 done
 echo "build.sh: fw/: $(ls -1 root/fw 2>/dev/null | wc -l) files from ../fw-*:${fwhave:- none present}${fwnone:+, absent:$fwnone}"
 # The images are what somebody would be handed to run this on a second phone, and two of the things
