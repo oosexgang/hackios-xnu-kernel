@@ -55,7 +55,7 @@ BATTERY	arg	battery	Audio and battery	kl	hakios.adsp.c,hakios.battery.c,loader.c
 BATTMGR	arg	battmgr	Audio and battery	k	hakios.adsp.c	every property once, for the log (which number is which on this phone's firmware)
 BT	arg	bt	User space	k	hakios.bt.c	
 BT_AGAIN	arg	bt_again	User space	k	hakios.bt.c	the second look this many seconds later (0: no second look; 30)
-BUTTONS	arg	buttons	Touch and buttons	k	hakios.buttons.c	
+BUTTONS	arg	buttons	Touch and buttons	k	hakios.buttons.c,hakios.mtk_keys.c	
 BUTTONS_STEPS	arg	buttons_steps	Touch and buttons	k	hakios.buttons.c	
 CA_VBL	arg	ca_vbl	User space	u	inject.c	CoreAnimation's frame clock from the display driver's refresh notifications
 CAENV	arg	caenv	User space	u	inject.c	
@@ -72,22 +72,35 @@ CAM_SETTLE	arg	cam_settle	Cameras	k	hakios.camera.c
 CAM_SHUTTER	arg	cam_shutter	Cameras	k	hakios.camera.c	
 CAM_VBLANK	arg	cam_vblank	Cameras	k	hakios.camera.c	
 CC_FADE	arg	cc_fade	User space	u	inject_sb.c	
+CONNSYS_STEP	arg	connsys_step	Wi-Fi	k	hakios.mtk_connsys.c	
 CPULOAD	arg	cpuload	CPU, memory and boot	k	hakios.cpufreq.c	every MS milliseconds, how busy each of our cores was meanwhile, in percent, to the loader's log (tools/frames.py shows it per gesture)
 CPUMASK	arg	cpumask	Loader	l	loader.c	
 DDR	arg	ddr	CPU, memory and boot	k	hakios.cpufreq.c	the memory's bus clock managers ("BCM") in the command database the boot loader left, with what is needed to vote for bandwidth on them -- only read
 DDR_REST	arg	ddr_rest	CPU, memory and boot	k	hakios.cpufreq.c	
 DDR_VOTE	arg	ddr_vote	CPU, memory and boot	k	hakios.cpufreq.c	
 DISPLAY_PROBE	arg	display_probe	GPU and display	k	hakios.adreno.c	before any step: read what the firmware left the display controller doing (display_probe() below; two clocks are turned on, nothing else written)
+EMMC_ROOT	arg	emmc_root	CPU, memory and boot	k	(patch)	
 FB_BEAT	arg	fb_beat	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_DIFF	arg	fb_diff	GPU and display	k	MiniIOMobileFramebuffer.cpp	which pixels of the panel each frame changed (it costs: the panel's memory is slow to read)
 FB_FILTER	arg	fb_filter	GPU and display	k	MiniIOMobileFramebuffer.cpp	the picture is scaled to the panel nearest neighbour, as it once was
+FB_FLICKER	arg	fb_flicker	GPU and display	k	MiniIOMobileFramebuffer.cpp	
+FB_FLIP	arg	fb_flip	GPU and display	k	MiniIOMobileFramebuffer.cpp	two of the boot framebuffer's pictures, drawn in turn, the panel's scanout (OVL0 layer 0) pointed at the finished one -- see flipStart()
 FB_HZ	arg	fb_hz	GPU and display	k	MiniIOMobileFramebuffer.cpp	
+FB_INUSE	arg	fb_inuse	GPU and display	k	MiniIOMobileFramebuffer.cpp	a swap's surfaces are counted in use while they wait for the panel, as on an iPhone: CoreAnimation took a surface still waiting here for the next
+FB_MEASURE	arg	fb_measure	GPU and display	k	MiniIOMobileFramebuffer.cpp	how often the panel is really refreshed
 FB_QUEUE	arg	fb_queue	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FB_THREADS	arg	fb_threads	GPU and display	k	MiniIOMobileFramebuffer.cpp	
+FBFIT	arg	fbfit	GPU and display	k	MiniIOMobileFramebuffer.cpp,hakios.tcm.c	keep the iPhone's proportions on a taller panel, black bands above and below
 FBHEIGHT	arg	fbheight	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FBSCALE	arg	fbscale	GPU and display	k	MiniIOMobileFramebuffer.cpp	the same 375 x 812 points drawn at two pixels a point instead of three
+FBSHOT	arg	fbshot	GPU and display	k	MiniIOMobileFramebuffer.cpp	the frame, 60 pixels wide, red green blue, in base64 on lines that begin "fbshot N:" (tools/fbshot.py makes a picture of them): what the screen
+FBSHOT_BAND	arg	fbshot_band	GPU and display	k	MiniIOMobileFramebuffer.cpp	
+FBSHOT_EVERY	arg	fbshot_every	GPU and display	k	MiniIOMobileFramebuffer.cpp	
+FBSHOT_PANEL	arg	fbshot_panel	GPU and display	k	MiniIOMobileFramebuffer.cpp	
+FBSHOT_W	arg	fbshot_w	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 FBTRACE	arg	fbtrace	GPU and display	k	MiniIOMobileFramebuffer.cpp	log the first N calls of every selector (default 3)
 FBWIDTH	arg	fbwidth	GPU and display	k	MiniIOMobileFramebuffer.cpp	
+FBXR	arg	fbxr	GPU and display	k	MiniIOMobileFramebuffer.cpp	
 GAMUT	arg	gamut	Loader	l	loader.c	
 GL	arg	gl	User space	u	inject.c,inject_sb.c	not even with a GPU; gl=1: also without one, by Mesa's software driver (slow; for working on eagl.c in QEMU)
 GLBLIT	arg	glblit	GPU and display	u	eagl.c	the surface's memory, as before
@@ -128,7 +141,12 @@ GPU_EXACT	arg	gpu_exact	GPU and display	k	hakios.adreno.c
 GPU_KEEP	arg	gpu_keep	GPU and display	k	hakios.gpu.cpp	
 GPU_LOG	arg	gpu_log	GPU and display	k	hakios.adreno.c	
 HAPTIC_EFFECT	arg	haptic_effect	Haptics and torch	k	hakios.haptic.c	
+KEYLOG	arg	keylog	Touch and buttons	k	hakios.mtk_keys.c	a line for every change, to check the wiring against
 MACHINE_NAME	arg	machine_name	CPU, memory and boot	k	GenericARMPE.cpp	
+MALI	arg	mali	GPU and display	k	hakios.mali.c	every address below belongs to this phone (the other phone's GPU is an Adreno, bsd/dev/hakios.adreno.c)
+MALI_FASTMAP	arg	mali_fastmap	GPU and display	k	hakios.mali.c	
+MALI_MHZ	arg	mali_mhz	Touch and buttons	k	hakios.mtk_keys.c	
+MALI_TRACE	arg	mali_trace	GPU and display	k	hakios.mali.c	a line for every job, "tl: j SEQ f|v q QUEUED b BEGAN e ENDED" in us of mach_absolute_time, beside touch_lat's lines of the display's and the Metal
 MEMBENCH	arg	membench	CPU, memory and boot	k	hakios.cpufreq.c	
 METAL	arg	metal	GPU and display	ku	HakiosMetal.m,MiniIOMobileFramebuffer.cpp	only the program metal_test (userland/src/metal_test.m): the safe level, for seeing what Metal does with the device
 MIC_ADC	arg	mic_adc	Audio and battery	k	hakios.mic.c	
@@ -176,6 +194,7 @@ MODEM_SIM_SWITCH_OFF	arg	modem_sim_switch_off	Cellular	k	hakios.mpss.c
 MODEM_STEP	arg	modem_step	Cellular	k	hakios.mpss.c	the steps once the root is there, then back to the loader if modem_return=1 says so
 MODEM_WAIT	arg	modem_wait	Cellular	k	hakios.mpss.c	
 MODEM_WDA_OFF	arg	modem_wda_off	Cellular	k	hakios.mpss.c	
+MTK_CPUFREQ	arg	mtk_cpufreq	Touch and buttons	k	hakios.mtk_keys.c	
 PMIC_LIST	arg	pmic_list	Chip, thermal and PMIC	k	hakios.pmic.c	only the clock, not the inventory of every block
 PRIVS	arg	privs	Security stand-ins	k	kern_minimac.c	
 RD	arg	rd	CPU, memory and boot	kl	(patch),loader.c	
@@ -191,6 +210,7 @@ REGTRACE	arg	regtrace	CPU, memory and boot	k	(patch)
 RETURN_CPU	arg	return_cpu	CPU, memory and boot	k	loader_return.c	
 RETURN_PANIC	arg	return_panic	CPU, memory and boot	k	loader_return.c	
 ROOT_APFS	arg	root_apfs	User space	u	init.c	the root is to be the Darwin root volume on /dev/DEV -- the phone's flash, read only
+SCP_STEP	arg	scp_step	Touch and buttons	k	hakios.mtk_scp.c	
 SERIAL	arg	serial	Loader	l	loader.c	
 SMALL_CORES	arg	small_cores	CPU, memory and boot	k	(patch)	
 SMALL_CORES_AFTER	arg	small_cores_after	CPU, memory and boot	k	GenericARMPE.cpp	
@@ -212,7 +232,9 @@ SOUND_GUARD_AS	arg	sound_guard_as	Audio and battery	k	hakios.sound.c
 SOUND_PAUSE	arg	sound_pause	Audio and battery	k	hakios.sound.c	
 SOUND_SECS	arg	sound_secs	Audio and battery	k	hakios.sound.c	
 SPEAKER_PROBE	arg	speaker_probe	Audio and battery	k	hakios.speaker.c	reads registers and nothing else: the pins, the power names (below)
+SURF_ALIGN	arg	surf_align	GPU and display	k	MiniIOSurface.cpp	
 SURF_CLEAR	arg	surf_clear	GPU and display	k	MiniIOSurface.cpp	kept memory is given out as it is (to see what the clearing costs; a surface is then not all zeroes)
+SURF_LOCKWAIT	arg	surf_lockwait	GPU and display	k	MiniIOSurface.cpp	a lock waits until the GPU is done with the surface (lockCommon); the X6826B's configuration turns it on
 SURFTRACE	arg	surftrace	GPU and display	k	MiniIOSurface.cpp	log the first N surfaces created (default 24)
 SURFTRACE_OF	arg	surftrace_of	GPU and display	k	MiniIOSurface.cpp	
 SWITCHER_WALLPAPER	arg	switcher_wallpaper	User space	u	inject_sb.c	
@@ -227,7 +249,7 @@ TORCH_MAX_S	arg	torch_max_s	Haptics and torch	k	hakios.torch.c
 TORCH_SECS	arg	torch_secs	Haptics and torch	k	hakios.torch.c	
 TOUCH_FLIP	arg	touch_flip	Touch and buttons	k	hakios.goodix.c	
 TOUCH_LAT	arg	touch_lat	GPU and display	ku	MiniIOMobileFramebuffer.cpp,eagl.c,hakios.goodix.c,hakios.gpu.cpp,hakios.input.c,inject.c,inject_sb.c	a line for every wait of a program's for the GPU that took a millisecond or more ("tl: f KIND US at US"), for telling apart what holds a frame up
-TOUCH_POLL_US	arg	touch_poll_us	Touch and buttons	k	hakios.goodix.c	
+TOUCH_POLL_US	arg	touch_poll_us	Touch and buttons	k	hakios.goodix.c,hakios.tcm.c	
 TOUCH_RATE	arg	touch_rate	Touch and buttons	k	hakios.goodix.c	the chip reports twice as often (Xiaomi's game mode; 240 otherwise)
 TOUCH_SPI_HZ	arg	touch_spi_hz	Touch and buttons	k	hakios.goodix.c	the bus at N Hz (Android's device tree gives the chip 5 MHz)
 UFS_BENCH	arg	ufs_bench	Storage and APFS	k	hakios.ufs.c	what one request through the loader costs, by size
@@ -247,6 +269,7 @@ USTACKS_COUNT	arg	ustacks_count	Debugging	k	user_exception_trace.c
 USTACKS_MS	arg	ustacks_ms	Debugging	k	user_exception_trace.c	
 USTACKS_THREADS	arg	ustacks_threads	Debugging	k	user_exception_trace.c	
 USTACKS_TNAME	arg	ustacks_tname	Debugging	k	user_exception_trace.c	
+VAR_HFS	arg	var_hfs	User space	u	init.c	
 VAR_SAVE_MS	arg	var_save_ms	Storage and APFS	k	hakios.ufs.c	
 VBLUR	arg	vblur	GPU and display	u	eagl.c	
 VIRTIO_BLK	arg	virtio_blk	Storage and APFS	k	hakios.virtio_blk.c	

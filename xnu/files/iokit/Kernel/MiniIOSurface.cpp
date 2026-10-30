@@ -78,6 +78,11 @@ enum {
 #define MINISURF_MAX_DIMENSION  16384
 #define MINISURF_MAX_ALLOC      (512u << 20)
 #define MINISURF_ROW_ALIGN      64
+/* boot-arg surf_align=1: rows a multiple of 64 bytes, as the Mali takes them (below); without it a row is as long as
+ * the client asks for, as it was (the POCO's, unchanged) */
+static TUNABLE(uint32_t, gRowAlignAsked, "surf_align", 0);
+/* boot-arg surf_lockwait=1: a lock waits until the GPU is done with the surface (lockCommon); the X6826B's configuration turns it on */
+static TUNABLE(uint32_t, gLockWaits, "surf_lockwait", 0);
 
 #define FOURCC(a, b, c, d) ((uint32_t)(a) << 24 | (uint32_t)(b) << 16 | (uint32_t)(c) << 8 | (uint32_t)(d))
 
@@ -587,6 +592,15 @@ surfaceCreate(OSDictionary * props, IOReturn * error)
 	if (bpr == 0) {
 		bpr = planeCount ? s->planes[0].bytesPerRow
 		    : alignUp((uint64_t) ((width + ew - 1) / ew) * bpe, MINISURF_ROW_ALIGN);
+	} else if (planeCount == 0 && gRowAlignAsked && wrapped == NULL) {
+		/*
+		 * A row as long as asked, made a multiple of 64 bytes, as IOSurface does to fit its
+		 * hardware (a client reads the length back, IOSurfaceGetBytesPerRow). The GPU takes a
+		 * surface only with rows of 64 bytes: a 710-pixel surface at 2848 bytes a row had to be
+		 * copied into a texture and drawn back out of one, the window server waiting for the
+		 * GPU at every frame that drew into it (24 October).
+		 */
+		bpr = alignUp(bpr, MINISURF_ROW_ALIGN);
 	}
 	if (planeCount == 0) {
 		needed = (uint64_t) bpr * ((height + eh - 1) / eh);
@@ -777,6 +791,20 @@ MiniIOSurfaceDrop(MiniIOSurface * s)
 	}
 	IOLockLock(gSurfaceLock);
 	surfaceUnhold(s);
+	IOLockUnlock(gSurfaceLock);
+}
+
+void
+MiniIOSurfaceUse(MiniIOSurface * s, int delta)
+{
+	if (s == NULL) {
+		return;
+	}
+	IOLockLock(gSurfaceLock);
+	if (delta > 0 || s->useCount[0] != 0) {
+		s->useCount[0] += delta;
+		s->shared()->useCount = (uint64_t) s->useCount[1] << 32 | s->useCount[0];
+	}
 	IOLockUnlock(gSurfaceLock);
 }
 
@@ -1758,12 +1786,24 @@ IOSurfaceRootUserClient::trapDecrementUseCount(void * p1, void * p2, void * p3, 
 /*
  * Lock and unlock do not exclude anybody: the memory is shared and always mapped.
  * What matters is the seed, which tells readers that the pixels may have changed.
+ *
+ * And, with boot-arg surf_lockwait=1 (since 26 October on the X6826B), that the GPU is done with the surface: as
+ * on an iPhone, a lock is where the processor waits for the drawing it is about to read. The Metal driver no longer waits for its
+ * command buffers, so a snapshot of an application or a widget that backboardd drew into a surface
+ * was read by SpringBoard half drawn -- parts of other frames in the closing Settings and an empty
+ * weather widget in the user's video. The same wait the display makes (MiniIOSurfaceDrawn).
  */
 IOReturn
 IOSurfaceRootUserClient::lockCommon(uint32_t sid, uint32_t options, user_addr_t seedOut)
 {
 	struct minisurf_client_ref * ref;
 	uint32_t seed = 0;
+	MiniIOSurface * drawn = gLockWaits ? MiniIOSurfaceCopy(sid) : NULL;
+
+	if (drawn != NULL) {
+		(void) MiniIOSurfaceDrawn(drawn, 500);
+		MiniIOSurfaceDrop(drawn);
+	}
 
 	IOLockLock(gSurfaceLock);
 	ref = findRef(sid, false);

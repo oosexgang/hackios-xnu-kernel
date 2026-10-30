@@ -230,11 +230,13 @@ try:
           len(hc.SYMBOLS) >= 300 and len({s[0] for s in hc.SYMBOLS}) == len(hc.SYMBOLS), len(hc.SYMBOLS))
 
     # the drivers: compiled in, not arguments
-    check("redwood builds every driver, and they give no argument",
-          all("CONFIG_%s=y" % d.symbol in open(cfg).read() for d in hc.DRIVERS) and len(hc.DRIVERS) >= 20 and
+    # (MediaTek's drivers, mtk/<soc>/drivers/, are `default n`: only a configuration with their SoC's fragment has them)
+    check("redwood builds every driver that is built by default, and they give no argument",
+          all("CONFIG_%s=y" % d.symbol in open(cfg).read() for d in hc.DRIVERS if d.default == "y") and len(hc.DRIVERS) >= 20 and
           not any(x.startswith("hakios_") for x in args_of(run("args", "--config", cfg))), len(hc.DRIVERS))
     built = hc.drivers_built({})
-    check("a configuration that names no driver builds them all (their default)", all(built.values()), built)
+    check("a configuration that names no driver builds them all (their default), and none that is `default n`",
+          all(v == (hc.DRIVER_BY_SYMBOL[k].default == "y") for k, v in built.items()), built)
     off = dict(hc.parse(cfg)[0])
     problems, _ = hc.check(dict(off, HAKIOS_ADSP="n"))
     check("a driver without one it requires is refused (SOUND without ADSP)", any("CONFIG_HAKIOS_SOUND requires CONFIG_HAKIOS_ADSP" in p for p in problems), problems)

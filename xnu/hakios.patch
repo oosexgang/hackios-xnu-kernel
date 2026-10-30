@@ -1,5 +1,5 @@
 diff --git a/Makefile b/Makefile
-index e78d8476c346..03fc3ff646b8 100644
+index e78d8476c346..eca14d325197 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -143,8 +143,8 @@ installsrc:
@@ -8,8 +8,8 @@ index e78d8476c346..03fc3ff646b8 100644
  
 -export SYSCTL_HW_PHYSICALCPU := $(shell /usr/sbin/sysctl -n hw.physicalcpu)
 -export SYSCTL_HW_LOGICALCPU  := $(shell /usr/sbin/sysctl -n hw.logicalcpu)
-+export SYSCTL_HW_PHYSICALCPU := $(shell nproc)
-+export SYSCTL_HW_LOGICALCPU  := $(shell nproc)
++export SYSCTL_HW_PHYSICALCPU := $(shell sysctl -n hw.physicalcpu 2>/dev/null || nproc)
++export SYSCTL_HW_LOGICALCPU  := $(shell sysctl -n hw.logicalcpu 2>/dev/null || nproc)
  MAKEJOBS := --jobs=$(shell expr $(SYSCTL_HW_LOGICALCPU) + 1)
  
  default: install
@@ -19,8 +19,8 @@ index e78d8476c346..03fc3ff646b8 100644
  
 -export SYSCTL_HW_PHYSICALCPU := $(shell /usr/sbin/sysctl -n hw.physicalcpu)
 -export SYSCTL_HW_LOGICALCPU  := $(shell /usr/sbin/sysctl -n hw.logicalcpu)
-+export SYSCTL_HW_PHYSICALCPU := $(shell nproc)
-+export SYSCTL_HW_LOGICALCPU  := $(shell nproc)
++export SYSCTL_HW_PHYSICALCPU := $(shell sysctl -n hw.physicalcpu 2>/dev/null || nproc)
++export SYSCTL_HW_LOGICALCPU  := $(shell sysctl -n hw.logicalcpu 2>/dev/null || nproc)
  MAKEJOBS := --jobs=$(shell expr $(SYSCTL_HW_LOGICALCPU) + 1)
  
  default: install
@@ -30,8 +30,8 @@ index e78d8476c346..03fc3ff646b8 100644
  #
 -export SYSCTL_HW_PHYSICALCPU := $(shell /usr/sbin/sysctl -n hw.physicalcpu)
 -export SYSCTL_HW_LOGICALCPU  := $(shell /usr/sbin/sysctl -n hw.logicalcpu)
-+export SYSCTL_HW_PHYSICALCPU := $(shell nproc)
-+export SYSCTL_HW_LOGICALCPU  := $(shell nproc)
++export SYSCTL_HW_PHYSICALCPU := $(shell sysctl -n hw.physicalcpu 2>/dev/null || nproc)
++export SYSCTL_HW_LOGICALCPU  := $(shell sysctl -n hw.logicalcpu 2>/dev/null || nproc)
  MAKEJOBS := --jobs=$(shell expr $(SYSCTL_HW_LOGICALCPU) + 1)
  
  TOP_TARGETS = \
@@ -119,10 +119,10 @@ index 4b83160780c3..8997af1f0e1b 100644
  include $(MakeInc_rule)
  include $(MakeInc_dir)
 diff --git a/bsd/conf/files b/bsd/conf/files
-index 44274016a4cf..27cccab98c8e 100644
+index 44274016a4cf..f5a05f6466da 100644
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -109,6 +109,51 @@ bsd/dev/munge.c 			optional config_requires_u32_munging
+@@ -109,6 +109,57 @@ bsd/dev/munge.c 			optional config_requires_u32_munging
  bsd/dev/unix_startup.c			standard
  
  bsd/dev/monotonic.c optional monotonic
@@ -170,11 +170,17 @@ index 44274016a4cf..27cccab98c8e 100644
 +bsd/dev/hakios.lx.c                      optional hakios_wifi
 +bsd/dev/hakios.sta.c                     optional hakios_wifi
 +bsd/dev/hakios.apple80211.c              optional hakios_wifi
++bsd/dev/hakios.mali.c                    optional hakios_mali
++bsd/dev/hakios.mtk_keys.c                optional hakios_mtk_keys
++bsd/dev/hakios.mtk_scp.c                 optional hakios_mtk_scp
++bsd/dev/hakios.tcm.c                     optional hakios_tcm
++bsd/dev/hakios.mtk_emmc.c                optional hakios_mtk_emmc
++bsd/dev/hakios.mtk_connsys.c             optional hakios_mtk_connsys
 +# end of the HakiOS drivers
  bsd/dev/dev_perfmon.c optional config_perfmon
  
  bsd/libkern/crc32.c			standard
-@@ -155,6 +200,52 @@ bsd/miscfs/devfs/devfs_vfsops.c		optional devfs
+@@ -155,6 +206,52 @@ bsd/miscfs/devfs/devfs_vfsops.c		optional devfs
  bsd/miscfs/mockfs/mockfs_fsnode.c	optional mockfs
  bsd/miscfs/mockfs/mockfs_vfsops.c	optional mockfs
  bsd/miscfs/mockfs/mockfs_vnops.c	optional mockfs
@@ -227,7 +233,7 @@ index 44274016a4cf..27cccab98c8e 100644
  
  bsd/miscfs/routefs/routefs_ops.c	optional routefs
  
-@@ -361,6 +452,7 @@ bsd/security/audit/audit_syscalls.c		standard
+@@ -361,6 +458,7 @@ bsd/security/audit/audit_syscalls.c		standard
  bsd/security/audit/audit_worker.c		optional config_audit
  
  bsd/pthread/pthread_shims.c		standard
@@ -235,7 +241,7 @@ index 44274016a4cf..27cccab98c8e 100644
  bsd/pthread/pthread_priority.c		standard
  bsd/pthread/pthread_workqueue.c		standard
  
-@@ -383,6 +475,7 @@ bsd/kern/kern_debug.c			standard
+@@ -383,6 +481,7 @@ bsd/kern/kern_debug.c			standard
  bsd/kern/kern_symfile.c			standard
  bsd/kern/kern_descrip.c			standard
  bsd/kern/kern_guarded.c			standard
@@ -1848,10 +1854,18 @@ index 2b14eda8f68f..09337bad5b01 100644
 +#endif
      ")";
 diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
-index 5219fb0d9ed6..29978e9cff43 100644
+index 5219fb0d9ed6..ab4e83089940 100644
 --- a/iokit/bsddev/IOKitBSDInit.cpp
 +++ b/iokit/bsddev/IOKitBSDInit.cpp
-@@ -683,7 +683,14 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+@@ -64,6 +64,7 @@ extern dev_t mdevadd(int devid, uint64_t base, unsigned int size, int phys);
+ extern dev_t mdevlookup(int devid);
+ extern void mdevremoveall(void);
+ extern int mdevgetrange(int devid, uint64_t *base, uint64_t *size);
++extern int hakios_mtk_emmc_root(dev_t *root);        /* mtk/mt6768/drivers/storage/hakios.mtk_emmc.c; ENXIO when not built */
+ extern void di_root_ramfile(IORegistryEntry * entry);
+ extern int IODTGetDefault(const char *key, void *infoAddr, unsigned int infoSize);
+ extern boolean_t cpuid_vmm_present(void);
+@@ -683,7 +684,14 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
  	assert(matching);
  	matching->setObject(gIOResourceMatchedKey, gIOBSDKey);
  
@@ -1867,7 +1881,7 @@ index 5219fb0d9ed6..29978e9cff43 100644
  		OSSafeReleaseNULL(service);
  	} else {
  		IOLog("!BSD\n");
-@@ -762,6 +769,17 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+@@ -762,10 +770,39 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
  #endif /* __LP64__ */
  				(void)mdevadd(-1, ml_static_ptovirt(ramdParms[0]) >> 12, (unsigned int) (ramdParms[1] >> 12), 0);        /* Initialize it and pass back the device number */
  			}
@@ -1879,12 +1893,34 @@ index 5219fb0d9ed6..29978e9cff43 100644
 +			if (data && data->getLength() >= 2 * sizeof(uintptr_t)) {
 +				uintptr_t *ramdParms = (uintptr_t *)data->getBytesNoCopy();
 +				if (ramdParms[1] <= (((uint64_t)UINT_MAX) << 12)) {
-+					(void)mdevadd(-1, ml_static_ptovirt(ramdParms[0]) >> 12, (unsigned int) (ramdParms[1] >> 12), 0);
++					/* md1 even without an md0: the system image read off the eMMC instead (emmc_root=1, below) */
++					(void)mdevadd(mdevlookup(1) == -1 ? 1 : -1, ml_static_ptovirt(ramdParms[0]) >> 12,
++					    (unsigned int) (ramdParms[1] >> 12), 0);
 +				}
 +			}
  			regEntry->release();                                                            /* Toss the entry */
  		}
  	}
+ 
++//
++//	The MT6768's eMMC, its system image read as it is needed (mtk/mt6768/drivers/storage/hakios.mtk_emmc.c): boot-arg
++//	emmc_root=1 beside rd=md0, which stays for user space to see -- libignition takes the "ramdisk" boot from it
++//
++	uint32_t emmcRoot = 0;
++	if (PE_parse_boot_argn("emmc_root", &emmcRoot, sizeof(emmcRoot)) && emmcRoot) {
++		OSSafeReleaseNULL(matching);
++		if (hakios_mtk_emmc_root(root) != 0) {
++			panic("IOFindBSDRoot: emmc_root=1, but the eMMC's xnusys partition could not be read (or CONFIG_HAKIOS_MTK_EMMC is not set)");
++		}
++		strlcpy(rootName, "emmc0", rootNameSize);
++		IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));
++		*oflags = 0;
++		goto iofrootx;
++	}
++
+ //
+ //	Now check if we are trying to root on a memory device
+ //
 diff --git a/iokit/conf/Makefile b/iokit/conf/Makefile
 index 83259ebf9835..8864e5c7cc41 100644
 --- a/iokit/conf/Makefile
@@ -1900,10 +1936,10 @@ index 83259ebf9835..8864e5c7cc41 100644
  DOCONFDEPS += $(MASTERCONFDIR)/MASTER.$(DOCONF_ARCH_CONFIG_LC).$(CURRENT_MACHINE_CONFIG_LC)
  endif
 diff --git a/iokit/conf/files b/iokit/conf/files
-index 5fb0a52062e0..7cfee3142b5b 100644
+index 5fb0a52062e0..b33718e015aa 100644
 --- a/iokit/conf/files
 +++ b/iokit/conf/files
-@@ -79,6 +79,17 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
+@@ -79,6 +79,18 @@ iokit/Kernel/IOSubMemoryDescriptor.cpp			optional iokitcpp
  iokit/Kernel/IOGuardPageMemoryDescriptor.cpp		optional iokitcpp
  
  iokit/Kernel/IOPlatformExpert.cpp			optional iokitcpp
@@ -1915,6 +1951,7 @@ index 5fb0a52062e0..7cfee3142b5b 100644
 +iokit/Kernel/hakios.gpu.cpp              optional hakios_adreno iokitcpp
 +iokit/Kernel/hakios.battery.cpp          optional hakios_battery iokitcpp
 +iokit/Kernel/hakios.wlan.cpp             optional hakios_wifi iokitcpp
++iokit/Kernel/hakios.mali.cpp             optional hakios_mali iokitcpp
 +# end of the HakiOS drivers
 +iokit/Kernel/MiniAppleKeyStore.cpp			optional iokitcpp
 +iokit/Kernel/MiniIONetworkStack.cpp			optional iokitcpp

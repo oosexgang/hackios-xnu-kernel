@@ -142,7 +142,8 @@ def layers(root):
     drivers/<subsystem>/conf) that `tools/hakios-device.py sync` clones into place, or that lives in this tree until it has a
     repository of its own."""
     out = [("common", "common", root)]
-    for kind, top, marker in (("soc", "socs", "soc.conf"), ("device", "devices", "device.conf")):
+    # (mtk/<soc>/: MediaTek's SoC layers, kept in this tree beside the loader every MediaTek phone boots through: mtk/README.md)
+    for kind, top, marker in (("soc", "socs", "soc.conf"), ("soc", "mtk", "soc.conf"), ("device", "devices", "device.conf")):
         base = os.path.join(root, top)
         for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
             if os.path.isfile(os.path.join(base, name, marker)):
@@ -436,7 +437,7 @@ def find_config(root, name):
         if found:
             return found[0]
     available = sorted({n for d in config_dirs(root) for n in os.listdir(d)})
-    raise ConfigError("no %s, %s_defconfig or %s.config in configs/, socs/*/configs/ or devices/*/configs/ (there is: %s)" %
+    raise ConfigError("no %s, %s_defconfig or %s.config in configs/, socs/*/configs/, mtk/*/configs/ or devices/*/configs/ (there is: %s)" %
                       (base, base, base, ", ".join(available) or "nothing"))
 
 
@@ -606,8 +607,20 @@ def arg_readers():
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             found = module.scan(ROOT)
-            _READERS.append({arg: set(where["kernel"]) for arg, where in found.items()
-                             if where["kernel"] and not where["loader"] and not where["user"]})
+            readers = {arg: set(where["kernel"]) for arg, where in found.items()
+                       if where["kernel"] and not where["loader"] and not where["user"]}
+            # the drivers of a SoC's or device's repository are not files of this one, which the scan reads: theirs as well
+            for d in DRIVERS:
+                for path, _tags in d.files if d.origin else []:
+                    try:
+                        text = open(d.source(path), encoding="utf-8", errors="replace").read()
+                    except OSError:
+                        continue
+                    for pattern in (module.KERNEL, module.TUNABLE):
+                        for m in pattern.finditer(text):
+                            if not found.get(m.group(1), {}).get("loader") and not found.get(m.group(1), {}).get("user"):
+                                readers.setdefault(m.group(1), set()).add(os.path.basename(path))
+            _READERS.append(readers)
         except (OSError, subprocess.CalledProcessError, AttributeError):
             _READERS.append(None)
     return _READERS[0]

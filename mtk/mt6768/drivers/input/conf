@@ -1,0 +1,23 @@
+# mtk/mt6768/drivers/input/conf: the MT6768's keys and its sensor hub.
+# CONFIG_HAKIOS_<NAME>=y in a defconfig builds a driver into the kernel (docs/drivers-config.md). MediaTek's drivers are
+# `default n`: a configuration has them only when it includes mt6768.config.
+
+driver MTK_KEYS
+	file    bsd/dev/hakios.mtk_keys.c
+	default n
+	help    the power and volume keys through the keypad at 0x10010000 and the PMIC's power key (buttons=2), and the clocks of
+	help    the big cores (mtk_cpufreq=N) and of the Mali (mali_mhz=N, 375 to 950: GPUPLL, with VSRAM_GPU and VGPU set as
+	help    MediaTek's table has them for that clock)
+
+driver MTK_SCP
+	file    bsd/dev/hakios.mtk_scp.c
+	default n
+	help    the SCP, the MT6768's sensor processor, started step by step (scp_step=N): its firmware's sensor hub, the
+	help    accelerometer as kern.hakios.accel and the way up as kern.hakios.orientation_state (scp_step=7)
+
+driver TCM
+	file    bsd/dev/hakios.tcm.c
+	default n
+	help    the touch screen of the Infinix Hot 20 (x6826b): an OmniVision TD4160 on the MT6768's SPI2, TCM protocol
+	help    (touchscreen=2); mtkloader sends it its firmware (fw-touch/) before the kernel starts. The bus and pins are
+	help    that phone's; another MT6768 phone with this controller changes those

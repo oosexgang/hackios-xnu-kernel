@@ -2,13 +2,13 @@
 
 Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
 
-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **319 arguments**: 270 read by the kernel, 14 by the loader, 45 by user space (one is read in more than one place).
+Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **342 arguments**: 292 read by the kernel, 14 by the loader, 46 by user space (one is read in more than one place).
 
 This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list.
 
 Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl kern.bootargs`).
 
-## GPU and display (68)
+## GPU and display (84)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -28,13 +28,24 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `fb_beat` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_BEAT` |  |
 | `fb_diff` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_DIFF` |  |
 | `fb_filter` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_FILTER` |  |
+| `fb_flicker` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_FLICKER` |  |
+| `fb_flip` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_FLIP` |  |
 | `fb_hz` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_HZ` |  |
+| `fb_inuse` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_INUSE` |  |
+| `fb_measure` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_MEASURE` |  |
 | `fb_queue` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_QUEUE` |  |
 | `fb_threads` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FB_THREADS` |  |
+| `fbfit` | K | `MiniIOMobileFramebuffer.cpp`, `hakios.tcm.c` | `CONFIG_FBFIT` |  |
 | `fbheight` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBHEIGHT` |  |
 | `fbscale` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBSCALE` |  |
+| `fbshot` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBSHOT` |  |
+| `fbshot_band` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBSHOT_BAND` |  |
+| `fbshot_every` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBSHOT_EVERY` |  |
+| `fbshot_panel` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBSHOT_PANEL` |  |
+| `fbshot_w` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBSHOT_W` |  |
 | `fbtrace` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBTRACE` |  |
 | `fbwidth` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBWIDTH` |  |
+| `fbxr` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_FBXR` |  |
 | `glblit` | U | `eagl.c` | `CONFIG_GLBLIT` |  |
 | `glcensus` | U | `eagl.c` | `CONFIG_GLCENSUS` |  |
 | `glcopy` | U | `eagl.c` | `CONFIG_GLCOPY` |  |
@@ -69,13 +80,18 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `gpu_exact` | K | `hakios.adreno.c` | `CONFIG_GPU_EXACT` |  |
 | `gpu_keep` | K | `hakios.gpu.cpp` | `CONFIG_GPU_KEEP` |  |
 | `gpu_log` | K | `hakios.adreno.c` | `CONFIG_GPU_LOG` |  |
+| `mali` | K | `hakios.mali.c` | `CONFIG_MALI` |  |
+| `mali_fastmap` | K | `hakios.mali.c` | `CONFIG_MALI_FASTMAP` |  |
+| `mali_trace` | K | `hakios.mali.c` | `CONFIG_MALI_TRACE` |  |
 | `metal` | KU | `HakiosMetal.m`, `MiniIOMobileFramebuffer.cpp` | `CONFIG_METAL` |  |
 | `rec_mb` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_MB` |  |
 | `rec_ring` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_RING` |  |
 | `rec_secs` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_SECS` |  |
 | `rec_start` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_START` |  |
 | `rec_step` | K | `MiniIOMobileFramebuffer.cpp` | `CONFIG_REC_STEP` |  |
+| `surf_align` | K | `MiniIOSurface.cpp` | `CONFIG_SURF_ALIGN` |  |
 | `surf_clear` | K | `MiniIOSurface.cpp` | `CONFIG_SURF_CLEAR` |  |
+| `surf_lockwait` | K | `MiniIOSurface.cpp` | `CONFIG_SURF_LOCKWAIT` |  |
 | `surftrace` | K | `MiniIOSurface.cpp` | `CONFIG_SURFTRACE` |  |
 | `surftrace_of` | K | `MiniIOSurface.cpp` | `CONFIG_SURFTRACE_OF` |  |
 | `touch_lat` | KU | `MiniIOMobileFramebuffer.cpp`, `eagl.c`, `hakios.goodix.c`, `hakios.gpu.cpp`, `hakios.input.c`, `inject.c`, `inject_sb.c` | `CONFIG_TOUCH_LAT` |  |
@@ -87,10 +103,11 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 |---|---|---|---|---|
 | `privs` | K | `kern_minimac.c` | `CONFIG_PRIVS` |  |
 
-## Wi-Fi (31)
+## Wi-Fi (32)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
+| `connsys_step` | K | `hakios.mtk_connsys.c` | `CONFIG_CONNSYS_STEP` |  |
 | `wifi` | K | `hakios.wifi.c` | `CONFIG_WIFI` |  |
 | `wifi_again` | K | `hakios.wifi.c` | `CONFIG_WIFI_AGAIN` |  |
 | `wifi_ask` | K | `hakios.wifi.c` | `CONFIG_WIFI_ASK` |  |
@@ -237,17 +254,21 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `cam_shutter` | K | `hakios.camera.c` | `CONFIG_CAM_SHUTTER` |  |
 | `cam_vblank` | K | `hakios.camera.c` | `CONFIG_CAM_VBLANK` |  |
 
-## Touch and buttons (8)
+## Touch and buttons (12)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
-| `buttons` | K | `hakios.buttons.c` | `CONFIG_BUTTONS` |  |
+| `buttons` | K | `hakios.buttons.c`, `hakios.mtk_keys.c` | `CONFIG_BUTTONS` |  |
 | `buttons_steps` | K | `hakios.buttons.c` | `CONFIG_BUTTONS_STEPS` |  |
+| `keylog` | K | `hakios.mtk_keys.c` | `CONFIG_KEYLOG` |  |
+| `mali_mhz` | K | `hakios.mtk_keys.c` | `CONFIG_MALI_MHZ` |  |
+| `mtk_cpufreq` | K | `hakios.mtk_keys.c` | `CONFIG_MTK_CPUFREQ` |  |
+| `scp_step` | K | `hakios.mtk_scp.c` | `CONFIG_SCP_STEP` |  |
 | `touch_flip` | K | `hakios.goodix.c` | `CONFIG_TOUCH_FLIP` |  |
-| `touch_poll_us` | K | `hakios.goodix.c` | `CONFIG_TOUCH_POLL_US` |  |
+| `touch_poll_us` | K | `hakios.goodix.c`, `hakios.tcm.c` | `CONFIG_TOUCH_POLL_US` |  |
 | `touch_rate` | K | `hakios.goodix.c` | `CONFIG_TOUCH_RATE` |  |
 | `touch_spi_hz` | K | `hakios.goodix.c` | `CONFIG_TOUCH_SPI_HZ` |  |
-| `touchscreen` | K | `hakios.buttons.c`, `hakios.goodix.c` | `CONFIG_TOUCHSCREEN` |  |
+| `touchscreen` | K | `hakios.buttons.c`, `hakios.goodix.c`, `hakios.tcm.c` | `CONFIG_TOUCHSCREEN` |  |
 | `virtio_input` | K | `hakios.virtio_input.c` | `CONFIG_VIRTIO_INPUT` |  |
 
 ## Storage and APFS (43)
@@ -337,7 +358,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 |---|---|---|---|---|
 | `hakios_kver` | K | `hakios.version.c` |  | the loader (from the payload's kernel.ver) |
 
-## CPU, memory and boot (23)
+## CPU, memory and boot (24)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -349,6 +370,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ddr` | K | `hakios.cpufreq.c` | `CONFIG_DDR` |  |
 | `ddr_rest` | K | `hakios.cpufreq.c` | `CONFIG_DDR_REST` |  |
 | `ddr_vote` | K | `hakios.cpufreq.c` | `CONFIG_DDR_VOTE` |  |
+| `emmc_root` | K | `(patch)` | `CONFIG_EMMC_ROOT` |  |
 | `epoch` | K | `GenericARMPE.cpp` |  | xl (the host's clock) |
 | `hv_wdt_pet` | K | `loader_return.c` |  | the loader, when it has armed the watchdog (the runner also passes it) |
 | `loader_return_after` | KL | `loader.c`, `loader_return.c` |  | xl (XL_SECS) |
@@ -387,7 +409,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `ufs` | L | `loader.c` | `CONFIG_UFS` |  |
 | `ufs_probe` | L | `loader.c` | `CONFIG_UFS_PROBE` |  |
 
-## User space (15)
+## User space (16)
 
 | Argument | Layer | Read by | Configuration | Set by |
 |---|---|---|---|---|
@@ -405,4 +427,5 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
 | `root_apfs` | U | `init.c` | `CONFIG_ROOT_APFS` |  |
 | `sb_delay` | U | `inject_sb.c` |  | xl (XL_SB_DELAY) |
 | `switcher_wallpaper` | U | `inject_sb.c` | `CONFIG_SWITCHER_WALLPAPER` |  |
+| `var_hfs` | U | `init.c` | `CONFIG_VAR_HFS` |  |
 | `var_store` | U | `init.c` | `CONFIG_VAR_STORE` |  |

@@ -1,0 +1,11 @@
+# mtk/mt6768/drivers/gpu/conf: the MT6768's GPU.
+# CONFIG_HAKIOS_<NAME>=y in a defconfig builds a driver into the kernel (docs/drivers-config.md). MediaTek's drivers are
+# `default n`: a configuration has them only when it includes mt6768.config.
+
+driver MALI
+	file    bsd/dev/hakios.mali.c
+	file    iokit/Kernel/hakios.mali.cpp iokitcpp
+	default n
+	help    the Mali-G52 MC2 brought up from the kernel (mali=1): power domains, clocks, its MMU, a queue of jobs; and
+	help    HakiosMali, panfrost's DRM interface as an IOKit service for Mesa and a Metal driver. Also kern.hakios.say, the
+	help    lines user space puts in the log, and kern.hakios.host_keep, the ones that must reach the host whole

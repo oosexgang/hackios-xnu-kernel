@@ -228,12 +228,18 @@ hakios_input_init(void)
 	hakios_cpufreq_init();
 	hakios_virtio_input_init();
 	hakios_goodix_init();
+	hakios_tcm_init();
 	hakios_buttons_init();
+	hakios_mtk_keys_init();
 	hakios_battery_init();
 	hakios_ufs_init();
 	hakios_net_init();
 	hakios_adreno_init();
+	hakios_mali_init();
+	hakios_mtk_connsys_init();
+	hakios_mtk_scp_init();
 	hakios_wifi_init();
 	hakios_adsp_init();
 	hakios_mpss_init();
+	hakios_mtk_emmc_devfs();
 }

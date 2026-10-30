@@ -76,6 +76,10 @@ differ, naming both, because a build would otherwise depend on which device was 
 copies the layer from a device that has it; a SoC nobody has yet gets a new layer to fill in. A SoC many devices share can also be a
 repository of its own in `socs/<soc>/` (a `soc` block in the manifest); the tools read both.
 
+MediaTek's SoC layers are kept in this tree, in `mtk/<soc>/` (`mtk/mt6768/`: the Helio G85), each with a `soc` block whose
+`path` names it; a MediaTek device's repository says `soc mt6768` and carries no copy. The tools read `mtk/*/soc.conf` as they
+read `socs/*/soc.conf`. What the MediaTek part is, and how it differs from the Qualcomm phones: [mtk/README.md](../../mtk/README.md).
+
 ## The manifest
 
 `devices/manifest.conf` names every SoC and device:

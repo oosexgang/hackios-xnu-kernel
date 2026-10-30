@@ -25,6 +25,9 @@
 #include <kern/thread.h>
 #include <kern/clock.h>
 #include <pexpert/pexpert.h>
+#include <libkern/c++/OSCollectionIterator.h>
+#include <libkern/c++/OSSymbol.h>
+#include <libkern/c++/OSString.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 
@@ -34,10 +37,39 @@ extern struct vc_info vinfo;            /* the boot framebuffer, as the text con
 }
 
 #include <IOKit/IOBufferMemoryDescriptor.h>
+#include <machine/machine_routines.h>
+#include <kern/cpu_number.h>
+
+/*
+ * The clock of the processor this runs on, in MHz: a chain of dependent adds, one cycle each
+ * on the A55 and the A75 alike, against the generic timer, interrupts off. (The PMU's cycle
+ * counter is no help, and CNTFRQ_EL0 reads 0 on this SoC, so the time is XNU's own
+ * mach_absolute_time, which it calibrated from the device tree.) Nothing under XNU sets
+ * the MT6768's frequencies, so the cores run at whatever LK left them at -- which this tells.
+ */
+static uint32_t
+hakios_core_mhz(int *cpu)
+{
+	uint64_t v0, v1, ns, x = 0;
+	const uint64_t rounds = 20000;          /* of 50 adds: a million cycles */
+	boolean_t on = ml_set_interrupts_enabled(FALSE);
+
+	*cpu = cpu_number();
+	v0 = mach_absolute_time();
+	for (uint64_t i = 0; i < rounds; i++) {
+		__asm__ volatile (
+		    ".rept 50\n\tadd %0, %0, #1\n\t.endr" : "+r"(x));
+	}
+	v1 = mach_absolute_time();
+	ml_set_interrupts_enabled(on);
+	absolutetime_to_nanoseconds(v1 - v0, &ns);
+	return ns ? (uint32_t)(rounds * 50 * 1000 / ns) : 0;
+}
 
 #include "MiniIOSurface.h"
 
 extern "C" void hakios_tl(const char * format, ...) __printflike(1, 2);
+extern "C" void hakios_keep(const char * format, ...) __printflike(1, 2);
 
 /* IOConnectCallMethod selectors of the framebuffer user client (Darwin userland 16.5) */
 enum {
@@ -111,8 +143,24 @@ static TUNABLE(uint32_t, gFBHeight, "fbheight", kFBDefaultHeight);
 #define kFBPointsHigh           812
 #define kFBDefaultScale         3
 static TUNABLE(uint32_t, gFBScale, "fbscale", 0);
+/*
+ * Boot-arg fbxr=1 (with fbscale=2): the iPhone XR's screen instead, 414 x 896 points at two pixels a
+ * point. Darwin userland 16.5 has a status bar for that one; for the iPhone X's 375 points at two it has none and puts
+ * up a red bar that says so ("Please see rdar://45025538"). It is also more room: 414 points across
+ * instead of 375, so less of everything is too large on a big panel.
+ */
+static TUNABLE(uint32_t, gFBXR, "fbxr", 0);
+#define kFBXRPointsWide         414
+#define kFBXRPointsHigh         896
+#define kFBXRSubtype            1792
 /* Boot-arg fbtrace=N: log the first N calls of every selector (default 3). */
 static TUNABLE(uint32_t, gFBTrace, "fbtrace", 3);
+/*
+ * Boot-arg fbfit=1: keep the iPhone's proportions on a taller panel, black bands above and below.
+ * fbfit=2: keep them by filling the panel's height instead, and cutting the sides: no bands, and
+ * 18 pixels lost at each edge of the X6826B's 720.
+ */
+static TUNABLE(uint32_t, gFBFit, "fbfit", 0);
 
 /*
  * A recording of the screen, for a machine one cannot look at while it runs (the phone is
@@ -137,11 +185,23 @@ static TUNABLE(uint32_t, gFBTrace, "fbtrace", 3);
  * memory, SpringBoard and the window server among them (two respring in one run); 256 did not.
  */
 static TUNABLE(uint32_t, gRecSeconds, "rec_secs", 0);
+static TUNABLE(uint32_t, gShot, "fbshot", 0);      /* a small picture of the frame in the log, every minute from this many seconds of frames on */
+static TUNABLE(uint32_t, gShotWidth, "fbshot_w", 0);      /* the picture's width (60 when not given) */
+static TUNABLE(uint32_t, gShotBand, "fbshot_band", 0);    /* 1, 2 or 3: only that third of the height (0: all of it; 4: each third in turn) */
+static TUNABLE(uint32_t, gShotEvery, "fbshot_every", 60);  /* seconds between pictures (a multiple of 5) */
+static TUNABLE(uint32_t, gShotPanel, "fbshot_panel", 0);    /* ... of a picture put on the panel from inside the kernel (MiniIOMobileFramebufferShow) */
 static TUNABLE(uint32_t, gRecStart, "rec_start", 0);
 static TUNABLE(uint32_t, gRecMegabytes, "rec_mb", 480);
 static TUNABLE(uint32_t, gRecRing, "rec_ring", 0);
 static TUNABLE(uint32_t, gRecStep, "rec_step", 3);
 static TUNABLE(uint32_t, gDiff, "fb_diff", 0);
+/*
+ * Boot-arg fb_flicker=1: every frame a picture 40 pixels wide is kept, and a part of the screen that
+ * is one way in a frame, another in the next and the first way again in the one after is counted as
+ * flicker (in the five-second lines); once a minute at most such a frame, the odd one and the one
+ * before it, is put in the log as fbshot pictures, for a run nobody watches.
+ */
+static TUNABLE(uint32_t, gFlicker, "fb_flicker", 0);
 /*
  * Boot-arg fb_filter=0: the picture is scaled to the panel nearest neighbour, as it once was. The
  * iPhone's 1125 x 2436 on this panel's 1080 x 2400 is 45 columns and 36 rows fewer: nearest
@@ -159,8 +219,20 @@ static TUNABLE(uint32_t, gOnTheBeat, "fb_beat", 1);
  * to 10 (the phone, 15 October; fb_threads=1 is how it was).
  */
 static TUNABLE(uint32_t, gThreads, "fb_threads", 3);
-#define SWAP_QUEUE              2                       /* frames that may wait for the panel at most (fb_queue) */
-static TUNABLE(uint32_t, gQueue, "fb_queue", 2);
+/*
+ * Three since 26 October: a swap comes in as soon as its command buffer is committed, before the GPU
+ * has begun it, and waits here some 8 ms for the GPU and then for its beat -- 20 ms a frame. With two
+ * places CoreAnimation's next swap found them both taken and waited (46 of 125 swaps, run 149), and the
+ * frames came every other refresh; with three, one frame's GPU work overlaps the one before's beat.
+ */
+#define SWAP_QUEUE              3                       /* frames that may wait for the panel at most (fb_queue) */
+static TUNABLE(uint32_t, gQueue, "fb_queue", 2);         /* (2 by default, as on the POCO; the X6826B's configuration gives its own) */
+/*
+ * Boot-arg fb_inuse=1: a swap's surfaces are counted in use while they wait for the panel, as on an iPhone: CoreAnimation took a surface still waiting here for the next
+ * frame and drew it over, and the panel showed a frame from before or after its turn -- part of the
+ * screen flickering in every page swipe (fb_flicker=1, 24 October).
+ */
+static TUNABLE(uint32_t, gSwapInUse, "fb_inuse", 0);   /* (seen on the X6826B, whose configuration turns it on; the POCO keeps what it had) */
 static inline unsigned
 swapQueue(void)
 {
@@ -260,7 +332,16 @@ class IOMobileFramebuffer : public IOService
 public:
 	IOLock *        fLock;
 	uint8_t *       fBase;                  /* the boot framebuffer: the panel */
+	/* boot-arg fb_flip=1: two of the boot framebuffer's pictures, drawn in turn, the panel's
+	 * scanout (OVL0 layer 0) pointed at the finished one -- see flipStart() */
+	bool            fFlip;
+	unsigned        fFront;                 /* which of the two the panel shows */
+	uint8_t *       fFlipVA[2];             /* each, where the frame drawn into it starts */
+	uint32_t        fFlipPA[2];             /* each, the address OVL0 is given */
+	volatile uint32_t * fOvl;
+	void flipStart(void);
 	uint32_t        fPanelWidth, fPanelHeight, fRowBytes;
+	uint32_t        fFillWidth, fCropX;         /* fbfit=2: the picture's width on the panel, and how much of it is cut off at each side */
 	uint32_t        fWidth, fHeight;        /* the display as user space sees it */
 	MiniIOSurface * fDefaultSurface;
 	uint32_t        fSwapID;
@@ -330,6 +411,8 @@ public:
 	void publishModes(void);
 	MiniIOSurface * defaultSurface(void);
 	void present(const uint8_t * swap);
+	void shot(MiniIOSurface * s);
+	uint32_t        fShotStats;
 	void show(const uint8_t * swap, MiniIOSurface ** surfaces);
 	void presenter(void);
 	static void presenterMain(void * self, wait_result_t result);
@@ -420,6 +503,57 @@ IOMobileFramebuffer::publishModes(void)
 	OSSafeReleaseNULL(color);
 }
 
+/*
+ * Boot-arg fb_flip=1: no frame copied into the picture the panel is scanning out. The panel is the
+ * framebuffer LK left, which the display engine reads continuously (OVL0 layer 0, video mode); a
+ * frame copied into it while it is read shows on the panel as part this frame, part the last -- in
+ * bands, the copy being split between fb_threads processors -- the strips of the slow-motion video
+ * of 27 October. LK's framebuffer holds three pictures and a half (0x1050000 bytes at 0x787b0000,
+ * mtkloader/mtkdbg.h): the second one is drawn while the first is shown, and then OVL0 is pointed at
+ * it. Only when OVL0 reads where the console's framebuffer is and the second picture fits.
+ */
+#define FLIP_OVL0               0x1400b000ULL           /* mtkloader/mtkdbg.h: OVL0_BASE */
+#define FLIP_OVL_L0_ADDR        0xf40
+#define FLIP_LK_FB_BASE         0x787b0000ULL
+#define FLIP_LK_FB_SIZE         0x1050000ULL
+extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+extern "C" vm_offset_t ml_io_map_wcomb(vm_offset_t phys_addr, vm_size_t size);
+static TUNABLE(uint32_t, gFlipOn, "fb_flip", 0);
+
+void
+IOMobileFramebuffer::flipStart(void)
+{
+	uint64_t picture = (uint64_t) fRowBytes * vinfo.v_height, offset = (uint64_t) (fBase - (uint8_t *) vinfo.v_baseaddr);
+	uint32_t scanned;
+	vm_offset_t second;
+
+	if (!gFlipOn) {
+		return;
+	}
+	fOvl = (volatile uint32_t *) ml_io_map(FLIP_OVL0, PAGE_SIZE);
+	scanned = fOvl != NULL ? fOvl[FLIP_OVL_L0_ADDR / 4] : 0;
+	picture = (picture + PAGE_SIZE - 1) & ~(uint64_t) (PAGE_SIZE - 1);
+	if (scanned != (uint32_t) vinfo.v_physaddr || scanned < FLIP_LK_FB_BASE ||
+	    scanned + 2 * picture > FLIP_LK_FB_BASE + FLIP_LK_FB_SIZE) {
+		IOLog("MiniIOMobileFramebuffer: fb_flip: OVL0 reads %#x, the console's framebuffer is at %#llx: "
+		    "not flipping\n", scanned, (unsigned long long) vinfo.v_physaddr);
+		return;
+	}
+	second = ml_io_map_wcomb(scanned + picture, (vm_size_t) picture);
+	if (second == 0) {
+		IOLog("MiniIOMobileFramebuffer: fb_flip: the second picture could not be mapped\n");
+		return;
+	}
+	memcpy((void *) second, (const void *) vinfo.v_baseaddr, (size_t) picture);
+	fFlipVA[0] = fBase;
+	fFlipVA[1] = (uint8_t *) second + offset;
+	fFlipPA[0] = scanned;
+	fFlipPA[1] = (uint32_t) (scanned + picture);
+	fFront = 0;
+	fFlip = true;
+	hakios_keep("MiniIOMobileFramebuffer: fb_flip: two pictures, at %#x and %#x", fFlipPA[0], fFlipPA[1]);
+}
+
 bool
 IOMobileFramebuffer::start(IOService * provider)
 {
@@ -460,12 +594,43 @@ IOMobileFramebuffer::start(IOService * provider)
 	fRowBytes = vinfo.v_rowbytes;
 	fWidth = gFBWidth ? gFBWidth : fPanelWidth;
 	fHeight = gFBHeight ? gFBHeight : fPanelHeight;
+	/*
+	 * A panel taller for its width than the iPhone's screen gets the picture at the iPhone's
+	 * proportions, centred, with black above and below -- scaled to the panel's whole height as
+	 * well it came out stretched (the X6826B's 720 x 1640 is 2.28 tall to the iPhone X's 2.17).
+	 * Its touch screen driver maps fingers into the same band. Only with boot-arg fbfit=1: the
+	 * other phone's touch driver knows nothing of the bands.
+	 */
+	fFillWidth = fPanelWidth;
+	fCropX = 0;
+	if (gFBFit == 2 && fWidth != 0 && fHeight != 0 && (uint64_t) fPanelHeight * fWidth > (uint64_t) fHeight * fPanelWidth + fWidth) {
+		fFillWidth = (uint32_t) ((uint64_t) fPanelHeight * fWidth / fHeight);
+		fCropX = (fFillWidth - fPanelWidth) / 2;
+		IOLog("MiniIOMobileFramebuffer: the picture fills the panel's height, %u wide with %u cut at each side\n",
+		    fFillWidth, fCropX);
+	} else if (gFBFit == 1 && fPanelWidth != 0 && fWidth != 0 && (uint64_t) fPanelHeight * fWidth > (uint64_t) fHeight * fPanelWidth + fWidth) {
+		uint32_t fit = (uint32_t) ((uint64_t) fPanelWidth * fHeight / fWidth);
+
+		fBase += (size_t) ((fPanelHeight - fit) / 2) * fRowBytes;
+		IOLog("MiniIOMobileFramebuffer: the picture keeps its proportions: %u of the panel's %u rows, from row %u\n",
+		    fit, fPanelHeight, (fPanelHeight - fit) / 2);
+		fPanelHeight = fit;
+	}
 	if (gFBScale != 0 && gFBScale != kFBDefaultScale) {
 		static const char * const places[][2] = { { "/chosen", "display-scale" }, { "/product", "artwork-scale-factor" } };
 		uint32_t scale = gFBScale;
 
-		fWidth = kFBPointsWide * scale;
-		fHeight = kFBPointsHigh * scale;
+		fWidth = (gFBXR ? kFBXRPointsWide : kFBPointsWide) * scale;
+		fHeight = (gFBXR ? kFBXRPointsHigh : kFBPointsHigh) * scale;
+		if (gFBXR) {
+			IORegistryEntry * product = IORegistryEntry::fromPath("/product", gIODTPlane);
+			uint32_t subtype = kFBXRSubtype;
+
+			if (product != NULL) {
+				product->setProperty("artwork-device-subtype", &subtype, sizeof(subtype));
+				product->release();
+			}
+		}
 		/* what the loader's device tree says about the scale is where MobileGestalt has it from */
 		for (unsigned i = 0; i < sizeof(places) / sizeof(places[0]); i++) {
 			IORegistryEntry * node = IORegistryEntry::fromPath(places[i][0], gIODTPlane);
@@ -476,6 +641,23 @@ IOMobileFramebuffer::start(IOService * provider)
 			}
 		}
 	}
+	/*
+	 * fbfit=3: the picture one pixel to a pixel of the panel, nothing scaled -- with fbscale=2 the
+	 * iPhone X's 750 x 1624 on the X6826B's 720 x 1640 is 15 columns cut at each side and 8 rows
+	 * of black above and below. A frame onto the panel is then a copy of its rows: scaling it
+	 * (bilinear) kept three of the four processors busy for 7 ms of every frame, the window
+	 * server and SpringBoard waiting for them (24 October). The touch screen driver
+	 * (bsd/dev/hakios_tcm.c) places fingers the same way.
+	 */
+	if (gFBFit == 3 && fWidth != 0 && fHeight != 0 && fHeight <= fPanelHeight) {
+		fFillWidth = fWidth;
+		fCropX = fWidth > fPanelWidth ? (fWidth - fPanelWidth) / 2 : 0;
+		fBase += (size_t) ((fPanelHeight - fHeight) / 2) * fRowBytes;
+		fPanelHeight = fHeight;
+		IOLog("MiniIOMobileFramebuffer: the picture one to one: %u of its %u columns, the panel's rows from %u\n",
+		    fWidth - 2 * fCropX, fWidth, (vinfo.v_height - fHeight) / 2);
+	}
+	flipStart();
 	fColumn = IONewZero(uint32_t, fPanelWidth);
 	fColumnWeight = IONewZero(uint16_t, fPanelWidth);
 	fDiff = gDiff != 0;
@@ -684,7 +866,8 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 		to = (uint32_t *) (fBase + (size_t) y * fRowBytes);
 		if (job->unscaled) {
 			/* not scaled at all */
-			memcpy(to + px0, pixels + (size_t) (sy + y - py0) * stride + (size_t) sx * 4, (size_t) sw * 4);
+			memcpy(to + cx0, pixels + (size_t) (sy + y - py0) * stride + (size_t) (sx + cx0 - px0) * 4,
+			    (size_t) (cx1 - cx0) * 4);
 			continue;
 		}
 		if (filter) {
@@ -813,11 +996,12 @@ IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int
 	}
 	/*
 	 * the rectangle on the panel, worked out in 64 bits: the request's numbers are the caller's, and a
-	 * rectangle of billions of rows is not drawn (nor looked at row by row)
+	 * rectangle of billions of rows is not drawn (nor looked at row by row). Across, the width the
+	 * picture fills and what of it is cropped (fbfit=)
 	 */
-	int64_t qx0 = (int64_t) dx * fPanelWidth / fWidth;
+	int64_t qx0 = (int64_t) dx * fFillWidth / fWidth - (int64_t) fCropX;
 	int64_t qy0 = (int64_t) dy * fPanelHeight / fHeight;
-	int64_t qx1 = ((int64_t) dx + dw) * fPanelWidth / fWidth;
+	int64_t qx1 = ((int64_t) dx + dw) * fFillWidth / fWidth - (int64_t) fCropX;
 	int64_t qy1 = ((int64_t) dy + dh) * fPanelHeight / fHeight;
 
 	if (qx0 < -DST_LIMIT || qy0 < -DST_LIMIT || qx1 > DST_LIMIT || qy1 > DST_LIMIT) {
@@ -896,7 +1080,7 @@ IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int
 	job.ry0 = py0 < 0 ? 0 : py0;
 	job.ry1 = py1 > (int32_t) fPanelHeight ? (int32_t) fPanelHeight : py1;
 	job.filter = filter;
-	job.unscaled = px1 - px0 == sw && py1 - py0 == sh && px0 >= 0 && (uint32_t) px1 <= fPanelWidth;
+	job.unscaled = px1 - px0 == sw && py1 - py0 == sh && cx1 > cx0;     /* (cut at the sides: fbfit=3) */
 	if (fThreads <= 1 || fDiff || fHelpersStarted + 1 < fThreads) {
 		drawRows(&job, job.ry0, job.ry1, fBlendRow);
 		return;
@@ -950,8 +1134,169 @@ IOMobileFramebuffer::reportFrameTimes(void)
 		    "%u longer (the longest %u ms); half under %u ms, 95 in 100 under %u ms; %u pauses\n", within[0], within[1],
 		    within[2], within[3], within[4], fFrameLongest, half, most, fFramePauses);
 	}
+	/*
+	 * And the whole run's so far, once a minute as a kept line: the five-second lines of a run
+	 * somebody used by hand are gone from the log by its end (run 143, 26 October). Counted only
+	 * from reports of 50 frames or more, which is something moving rather than the clock.
+	 */
+	{
+		static uint32_t run[5], reports;
+
+		if (total >= 50) {
+			for (uint32_t i = 0; i < 5; i++) {
+				run[i] += within[i];
+			}
+		}
+		if (++reports % 12 == 0) {
+			uint32_t all = run[0] + run[1] + run[2] + run[3] + run[4];
+
+			hakios_keep("MiniIOMobileFramebuffer: busy frames so far: %u, %u%% within 18 ms; %u under 26, %u under 35, %u longer",
+			    all, all ? (run[0] + run[1]) * 100 / all : 0, run[2], run[3], run[4]);
+		}
+	}
 	bzero(fFrameTimes, sizeof(fFrameTimes));
 	fFramePauses = fFrameLongest = 0;
+}
+
+/*
+ * Boot-arg fbshot=SECONDS: the frame, 60 pixels wide, red green blue, in base64 on lines that begin
+ * "fbshot N:" (tools/fbshot.py makes a picture of them): what the screen shows, for a run nobody
+ * watches. Every minute from SECONDS of frames on, so that the end of the log has one.
+ */
+static void
+shot_pixels(const uint8_t * base, uint32_t full_width, uint32_t full_height, uint32_t row_bytes, uint32_t across,
+    uint32_t band, uint32_t bands)
+{
+	static const char digits[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	static uint32_t shots;
+	uint32_t step = full_width / across, width, height;
+	uint8_t chunk[150];
+	char line[204];
+	unsigned used = 0;
+
+	if (step == 0) {
+		return;
+	}
+	width = full_width / step;
+	height = full_height / step;
+	/* one band of `bands` across the height: a wider picture than the log's end can keep whole, a third at a time */
+	uint32_t first = bands > 1 ? height * band / bands : 0, last = bands > 1 ? height * (band + 1) / bands : height;
+	shots++;
+	IOLog("fbshot %u: begin %u %u (rows %u to %u of %u)\n", shots, width, last - first, first, last, height);
+	for (uint32_t y = first; y < last; y++) {
+		const uint32_t * row = (const uint32_t *) (base + (size_t) (y * step + step / 2) * row_bytes);
+
+		for (uint32_t x = 0; x < width; x++) {
+			uint32_t pixel = row[x * step + step / 2];      /* B G R A in memory */
+
+			chunk[used++] = (pixel >> 16) & 0xff;
+			chunk[used++] = (pixel >> 8) & 0xff;
+			chunk[used++] = pixel & 0xff;
+			if (used == sizeof(chunk) || (y == last - 1 && x == width - 1)) {
+				unsigned n = 0;
+
+				for (unsigned i = 0; i < used; i += 3) {
+					uint32_t v = (uint32_t) chunk[i] << 16 | (i + 1 < used ? (uint32_t) chunk[i + 1] << 8 : 0) |
+					    (i + 2 < used ? chunk[i + 2] : 0);
+
+					line[n++] = digits[v >> 18 & 63];
+					line[n++] = digits[v >> 12 & 63];
+					line[n++] = digits[v >> 6 & 63];
+					line[n++] = digits[v & 63];
+				}
+				line[n] = 0;
+				IOLog("fbshot %u: %s\n", shots, line);
+				used = 0;
+			}
+		}
+	}
+	IOLog("fbshot %u: end\n", shots);
+}
+
+#define FLICKER_W       40
+#define FLICKER_H       200
+static uint32_t flickerPics[3][FLICKER_W * FLICKER_H];  /* (the presenter's thread only) */
+static uint32_t flickerNext, flickerKept, flickerFrames, flickerPixels;
+static uint64_t flickerShot;
+
+static inline uint32_t
+pixel_apart(uint32_t a, uint32_t b)
+{
+	uint32_t d = 0;
+
+	for (unsigned shift = 0; shift < 24; shift += 8) {
+		int32_t x = (int32_t) (a >> shift & 0xff) - (int32_t) (b >> shift & 0xff);
+
+		d += x < 0 ? -x : x;
+	}
+	return d;
+}
+
+static void
+flicker(MiniIOSurface * s)
+{
+	uint32_t step = s->info.width / FLICKER_W, height, odd = 0, left = ~0u, top = ~0u, right = 0, bottom = 0;
+
+	if (step == 0) {
+		return;
+	}
+	height = s->info.height / step;
+	height = height < FLICKER_H ? height : FLICKER_H;
+	uint32_t * now = flickerPics[flickerNext % 3], * was = flickerPics[(flickerNext + 2) % 3],
+	    * before = flickerPics[(flickerNext + 1) % 3];
+
+	for (uint32_t y = 0; y < height; y++) {
+		const uint32_t * row = (const uint32_t *) (s->pixels() + (size_t) (y * step + step / 2) * s->info.bytesPerRow);
+
+		for (uint32_t x = 0; x < FLICKER_W; x++) {
+			now[y * FLICKER_W + x] = row[x * step + step / 2];
+		}
+	}
+	flickerNext++;
+	if (flickerKept < 3) {
+		flickerKept++;
+		return;
+	}
+	/* `was` the odd one out: unlike the frame before it and the one after, and those two alike */
+	for (uint32_t y = 0; y < height; y++) {
+		for (uint32_t x = 0; x < FLICKER_W; x++) {
+			uint32_t i = y * FLICKER_W + x;
+
+			if (pixel_apart(was[i], before[i]) > 90 && pixel_apart(was[i], now[i]) > 90 &&
+			    pixel_apart(before[i], now[i]) < 30) {
+				odd++;
+				left = x < left ? x : left;
+				right = x > right ? x : right;
+				top = y < top ? y : top;
+				bottom = y > bottom ? y : bottom;
+			}
+		}
+	}
+	if (odd < 4) {
+		return;
+	}
+	flickerFrames++;
+	flickerPixels += odd;
+	/* a pair of pictures a minute at most: the log keeps only its last 256 KB */
+	uint64_t minute;
+
+	nanoseconds_to_absolutetime(60 * NSEC_PER_SEC, &minute);
+	if (flickerShot == 0 || mach_absolute_time() - flickerShot > minute) {
+		flickerShot = mach_absolute_time();
+		IOLog("MiniIOMobileFramebuffer: flicker: %u pixels of %u in a frame unlike the one before and after, within %u,%u to "
+		    "%u,%u; the frame before, then the odd one:\n", odd, FLICKER_W * height, left, top, right, bottom);
+		shot_pixels((const uint8_t *) before, FLICKER_W, height, FLICKER_W * 4, FLICKER_W, 0, 1);
+		shot_pixels((const uint8_t *) was, FLICKER_W, height, FLICKER_W * 4, FLICKER_W, 0, 1);
+	}
+}
+
+void
+IOMobileFramebuffer::shot(MiniIOSurface * s)
+{
+	static uint32_t taken;
+
+	shot_pixels(s->pixels(), s->info.width, s->info.height, s->info.bytesPerRow, gShotWidth ? gShotWidth : 60,
+	    gShotBand == 4 ? taken++ % 3 : gShotBand ? gShotBand - 1 : 0, gShotBand ? 3 : 1);
 }
 
 /* SwapEnd: the swap is handed to the thread that puts frames on the panel, as soon as that has no other waiting. */
@@ -988,6 +1333,9 @@ IOMobileFramebuffer::present(const uint8_t * swap)
 		uint32_t sid = swapWord(swap, SWAP_SURFACE(layer));
 
 		fSwapSurfaces[slot][layer] = sid != 0 ? MiniIOSurfaceCopy(sid) : NULL;
+		if (gSwapInUse) {
+			MiniIOSurfaceUse(fSwapSurfaces[slot][layer], 1);
+		}
 	}
 	fSwapsWaiting++;
 	IOLockWakeup(fSwapLock, fSwap, true);
@@ -1017,6 +1365,9 @@ IOMobileFramebuffer::presenter(void)
 		show(swap, surfaces);
 		for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
 			if (surfaces[layer] != NULL) {
+				if (gSwapInUse) {
+					MiniIOSurfaceUse(surfaces[layer], -1);
+				}
 				MiniIOSurfaceDrop(surfaces[layer]);
 			}
 		}
@@ -1067,12 +1418,6 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		}
 	}
 	shown = began;
-	/* its turn has come: the swap after it may be handed over */
-	IOLockLock(fSwapLock);
-	fSwapFirst = (fSwapFirst + 1) % SWAP_QUEUE;
-	fSwapsWaiting--;
-	IOLockWakeup(fSwapLock, &fSwapsWaiting, true);
-	IOLockUnlock(fSwapLock);
 	IOLockLock(fLock);
 	if (fLastFrame != 0) {
 		absolutetime_to_nanoseconds(began - fLastFrame, &nanos);
@@ -1090,6 +1435,9 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		IOLog("MiniIOMobileFramebuffer: swap %u (#%u): surfaces %u %u %u %u, layers set 0x%x cleared 0x%x\n",
 		    swapWord(swap, SWAP_ID), fSwapsShown, swapWord(swap, SWAP_SURFACE(0)), swapWord(swap, SWAP_SURFACE(1)),
 		    swapWord(swap, SWAP_SURFACE(2)), swapWord(swap, SWAP_SURFACE(3)), set, swapWord(swap, SWAP_LAYERS_CLEARED));
+	}
+	if (fFlip) {
+		fBase = fFlipVA[fFront ^ 1];    /* (the picture not on the panel) */
 	}
 	for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
 		uint32_t sid = swapWord(swap, SWAP_SURFACE(layer));
@@ -1139,9 +1487,29 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			}
 		}
 	}
+	if (fFlip) {
+		fFront ^= 1;
+		fOvl[FLIP_OVL_L0_ADDR / 4] = fFlipPA[fFront];
+		__builtin_arm_dsb(0xf);
+	}
 	drawn = mach_absolute_time();
+	/*
+	 * Its surfaces are on the panel now, and only now may the swap after it be handed over. Until
+	 * 27 October this was done before the copy: the window server, which draws in turn into just
+	 * two surfaces, began its next frame in the one being copied, and the panel showed part of one
+	 * frame and part of the next -- 768 frames begun in a surface the display still held in run
+	 * 228 (hakiosmetal.m counts them), the "breakcore" of every video of the Metal port.
+	 */
+	IOLockLock(fSwapLock);
+	fSwapFirst = (fSwapFirst + 1) % SWAP_QUEUE;
+	fSwapsWaiting--;
+	IOLockWakeup(fSwapLock, &fSwapsWaiting, true);
+	IOLockUnlock(fSwapLock);
 	if (recorded != NULL) {
 		record(recorded);
+	}
+	if (recorded != NULL && gFlicker) {
+		flicker(recorded);
 	}
 	fSwapsShown++;
 	if (gTouchLat) {
@@ -1169,12 +1537,50 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		absolutetime_to_nanoseconds(fStatDrawing, &drawing);
 		absolutetime_to_nanoseconds(fStatWaiting, &waiting);
 		absolutetime_to_nanoseconds(fStatBeatWait, &beat);
+		/* the first few reports only: the measurement holds interrupts off for a millisecond */
+		static unsigned measured;
+
+		if (measured < 8) {
+			int core;
+			uint32_t mhz = hakios_core_mhz(&core);
+
+			measured++;
+			hakios_keep("MiniIOMobileFramebuffer: core %d runs at %u MHz", core, mhz);
+		}
 		IOLog("MiniIOMobileFramebuffer: %u frames in %llu ms (%llu a second), %llu us each in the driver, after %llu us "
 		    "waiting for the GPU and, %u of them, %llu us for the next refresh; %u swaps waited for the frame before, "
 		    "%u gave up; %u swaps came a refresh late themselves\n", fStatFrames, nanos / NSEC_PER_MSEC,
 		    fStatFrames * NSEC_PER_SEC / nanos, drawing / fStatFrames / NSEC_PER_USEC,
 		    waiting / fStatFrames / NSEC_PER_USEC, fStatOnBeat, fStatOnBeat ? beat / fStatOnBeat / NSEC_PER_USEC : 0,
 		    fStatHeld, fStatLost, fStatSwapsLate);
+		if (recorded != NULL) {
+			/* what this frame looks like, for a run nobody watches: its average colour, and how much of it is not black */
+			uint64_t sum[3] = { 0, 0, 0 };
+			uint32_t lit = 0, samples = 0;
+
+			for (uint32_t y = recorded->info.height / 64; y < recorded->info.height; y += recorded->info.height / 32) {
+				const uint32_t * row = (const uint32_t *) (recorded->pixels() + (size_t) y * recorded->info.bytesPerRow);
+
+				for (uint32_t x = recorded->info.width / 32; x < recorded->info.width; x += recorded->info.width / 16) {
+					uint32_t pixel = row[x];        /* B G R A in memory */
+
+					sum[0] += (pixel >> 16) & 0xff;
+					sum[1] += (pixel >> 8) & 0xff;
+					sum[2] += pixel & 0xff;
+					lit += ((pixel >> 16) & 0xff) + ((pixel >> 8) & 0xff) + (pixel & 0xff) > 48;
+					samples++;
+				}
+			}
+			if (samples != 0) {
+				IOLog("MiniIOMobileFramebuffer: this frame on average red %llu green %llu blue %llu; %u%% of it not black\n",
+				    sum[0] / samples, sum[1] / samples, sum[2] / samples, lit * 100 / samples);
+			}
+			uint32_t every = gShotEvery >= 5 ? gShotEvery / 5 : 1;
+
+			if (gShot != 0 && ++fShotStats >= gShot / 5 && (fShotStats - gShot / 5) % every == 0) {
+				shot(recorded);
+			}
+		}
 		fStatSwapsLate = 0;
 		for (different = 0; different < 8 && fStatSurfaces[different] != 0; different++) {
 		}
@@ -1193,6 +1599,17 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		fStatHeld = fStatLost = fStatOnBeat = 0;
 		fStatWaiting = fStatBeatWait = 0;
 		reportFrameTimes();
+		if (gFlicker) {
+			/* (and the run's total, which the last of these lines carries past the log's lost middle) */
+			static uint32_t flickeredAll, framesAll;
+
+			flickeredAll += flickerFrames;
+			framesAll += fStatFrames;
+			IOLog("MiniIOMobileFramebuffer: %u frames flickered (unlike the frames before and after), %u pixels of the "
+			    "small picture each; %u of %u frames so far\n", flickerFrames, flickerFrames ? flickerPixels / flickerFrames : 0,
+			    flickeredAll, framesAll);
+			flickerFrames = flickerPixels = 0;
+		}
 		if (fDiff) {
 			IOLog("MiniIOMobileFramebuffer: %llu pixels of the panel changed a frame, all within %u,%u to %u,%u\n",
 			    fDiffPixels / fStatFrames, fDiffLeft, fDiffTop, fDiffRight, fDiffBottom);
@@ -1574,19 +1991,128 @@ publishDisplayNode(void)
  * service of this class to appear before it looks for a GPU at all (once per process). An
  * accelerator without the properties that name its Metal and OpenGL ES drivers is passed
  * over by both, which leaves CoreAnimation with its software renderer, as before.
+ *
+ * With boot-arg metal=1 a user process may put those two properties here, which is the whole
+ * of what keeps Metal from finding our driver; see setProperties below, and docs/metal.md 10.31
+ * (10.14 for the measurement that made it a boot-arg).
  */
+
+/* Metal's step 2 reads exactly these two, in this order, off this service (docs/metal.md 1). */
+#define kAcceleratorPluginNameKey      "MetalPluginName"
+#define kAcceleratorPluginClassNameKey "MetalPluginClassName"
+
+static bool gAcceleratorTakesProperties;        /* boot-arg metal=1 */
+
 class IOAcceleratorES : public IOService
 {
 	OSDeclareDefaultStructors(IOAcceleratorES);
+
+public:
+	virtual IOReturn setProperties(OSObject * properties) APPLE_KEXT_OVERRIDE;
 };
 
 OSDefineMetaClassAndStructors(IOAcceleratorES, IOService);
+
+/*
+ * Switch Metal's own device discovery on, from user space: IORegistryEntrySetCFProperties() with
+ * MetalPluginName and MetalPluginClassName. Metal reads the first (getMetalPluginClassForService,
+ * 0x181a39ba4), builds "/System/Library/Extensions/" + it + ".bundle", opens that with NSBundle
+ * and takes the class the second names; with the first missing it returns nil before it even
+ * reads the second, and that single `cbz` is where the chain breaks on this port today.
+ *
+ * This method is the only thing that was in the way. IORegistryEntry::setProperties is
+ * "return kIOReturnUnsupported" (IORegistryEntry.cpp) and IOService does not override it; the
+ * MAC check in front of the call has no policy to ask, because this kernel registers no iokit
+ * hook (bsd/kern/kern_minimac.c); and this service carries no property whitelist.
+ *
+ * Why it is gated on a boot-arg, which is a measured risk and not caution in general
+ * (docs/metal.md 10.14): the conditions Metal puts on a device object are asserts, not soft
+ * refusals (10.2-10.3). A process that asks Metal and is handed a half-made device does not
+ * degrade to another renderer -- it aborts ("Assertion failed: ([self
+ * conformsToProtocol:@protocol(MTLDeviceSPI)])", "failed assertion _limits.maxColorAttachments
+ * > 0"), and an aborting daemon is restarted by launchd, which is a loop. Published instead at
+ * registerService() time, the properties would exist before launchd, backboardd and SpringBoard
+ * are born, so each of the three would take the Metal road on its first call, with nobody left
+ * to read the log. Behind a boot-arg, a machine that has them is a machine booted on purpose to
+ * have them, and the first such boot is meant to be RC=rc.ios, where launchd is never born.
+ *
+ * An empty string removes a property rather than setting it. That is the way out of the loop
+ * above without a reboot: the properties live only in the registry, so processes started after
+ * they are gone go back to the software road.
+ *
+ * Everything else is refused, and refused whole, before anything is set: every process on the
+ * machine can reach this method and the only thing it exists for is this one switch.
+ */
+IOReturn
+IOAcceleratorES::setProperties(OSObject * properties)
+{
+	OSDictionary * dict = OSDynamicCast(OSDictionary, properties);
+	OSCollectionIterator * keys;
+	OSObject * next;
+	char who[32] = "?";
+
+	if (!gAcceleratorTakesProperties) {
+		static unsigned said;
+
+		if (said++ < 4) {
+			proc_selfname(who, sizeof(who));
+			IOLog("IOAcceleratorES: %s asks to set properties on it; boot-arg metal=1 was not given\n", who);
+		}
+		return kIOReturnUnsupported;
+	}
+	if (dict == NULL || dict->getCount() == 0) {
+		return kIOReturnBadArgument;
+	}
+	keys = OSCollectionIterator::withCollection(dict);
+	if (keys == NULL) {
+		return kIOReturnNoMemory;
+	}
+	proc_selfname(who, sizeof(who));
+	while ((next = keys->getNextObject()) != NULL) {
+		const OSSymbol * key = OSDynamicCast(OSSymbol, next);
+
+		if (key == NULL || (!key->isEqualTo(kAcceleratorPluginNameKey) &&
+		    !key->isEqualTo(kAcceleratorPluginClassNameKey))) {
+			IOLog("IOAcceleratorES: refusing what %s sent: only " kAcceleratorPluginNameKey " and "
+			    kAcceleratorPluginClassNameKey " are taken here\n", who);
+			keys->release();
+			return kIOReturnUnsupported;
+		}
+		if (OSDynamicCast(OSString, dict->getObject(key)) == NULL) {
+			IOLog("IOAcceleratorES: refusing \"%s\" from %s: Metal reads it as a CFString\n",
+			    key->getCStringNoCopy(), who);
+			keys->release();
+			return kIOReturnBadArgument;
+		}
+	}
+	keys->reset();
+	while ((next = keys->getNextObject()) != NULL) {
+		const OSSymbol * key = OSDynamicCast(OSSymbol, next);
+		OSString * value = OSDynamicCast(OSString, dict->getObject(key));
+
+		if (value->getLength() == 0) {
+			removeProperty(key);
+			IOLog("IOAcceleratorES: %s removed by %s\n", key->getCStringNoCopy(), who);
+		} else if (setProperty(key, value)) {
+			IOLog("IOAcceleratorES: %s = %s, set by %s\n", key->getCStringNoCopy(),
+			    value->getCStringNoCopy(), who);
+		} else {
+			IOLog("IOAcceleratorES: %s could not be set\n", key->getCStringNoCopy());
+			keys->release();
+			return kIOReturnNoMemory;
+		}
+	}
+	keys->release();
+	return kIOReturnSuccess;
+}
 
 static void
 publishAccelerator(IOService * provider)
 {
 	IOAcceleratorES * accelerator = OSTypeAlloc(IOAcceleratorES);
+	uint32_t metal = 0;
 
+	gAcceleratorTakesProperties = PE_parse_boot_argn("metal", &metal, sizeof(metal)) && metal != 0;
 	if (accelerator != NULL && accelerator->init() && accelerator->attach(provider)) {
 		uint32_t metal = 0;
 
@@ -1603,6 +2129,11 @@ publishAccelerator(IOService * provider)
 			IOLog("MiniIOMobileFramebuffer: metal=1: the accelerator names HakiosMetal as its Metal plug-in\n");
 		}
 		accelerator->registerService();
+		/* the first line to look for in the log of such a boot: the gate is open, nothing is set yet */
+		if (gAcceleratorTakesProperties) {
+			IOLog("IOAcceleratorES: metal=%u: this service takes " kAcceleratorPluginNameKey
+			    " and " kAcceleratorPluginClassNameKey " from user space\n", metal);
+		}
 	}
 	OSSafeReleaseNULL(accelerator);
 }
@@ -1623,6 +2154,15 @@ MiniIOMobileFramebufferShow(const uint8_t * pixels, uint32_t width, uint32_t hei
 	for (uint32_t y = 0; y < rows; y++) {
 		memcpy((void *) (vinfo.v_baseaddr + (size_t) y * vinfo.v_rowbytes), pixels + (size_t) y * rowBytes,
 		    (size_t) columns * 4);
+	}
+	/*
+	 * Boot-arg fbshot_panel=1: what such a picture put on the panel, 90 pixels wide, as
+	 * fbshot's lines (tools/fbshot.py): on the 60th picture and every 400th after, so that a
+	 * program repainting for minutes leaves one at the end of the log.
+	 */
+	static uint32_t shown;
+	if (gShotPanel && (++shown == 60 || (shown > 60 && (shown - 60) % 400 == 0))) {
+		shot_pixels((const uint8_t *) vinfo.v_baseaddr, columns, rows, (uint32_t) vinfo.v_rowbytes, 90, 0, 1);
 	}
 }
 

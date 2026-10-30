@@ -97,10 +97,11 @@ def manifest():
 def soc_homes():
     """{SoC name: its directory}: socs/<name>/, then the SoC layers devices carry (devices/<device>/soc/), the first of each."""
     out = {}
-    base = os.path.join(ROOT, "socs")
-    for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
-        if os.path.isfile(os.path.join(base, name, "soc.conf")):
-            out.setdefault(name, os.path.join(base, name))
+    for top in ("socs", "mtk"):         # (mtk/<soc>/: MediaTek's SoC layers, kept in this tree: mtk/README.md)
+        base = os.path.join(ROOT, top)
+        for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+            if os.path.isfile(os.path.join(base, name, "soc.conf")):
+                out.setdefault(name, os.path.join(base, name))
     base = os.path.join(ROOT, "devices")
     for dev in sorted(os.listdir(base)) if os.path.isdir(base) else []:
         top = os.path.join(base, dev, "soc")

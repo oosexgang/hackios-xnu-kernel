@@ -15,7 +15,9 @@
  */
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <sys/errno.h>
+#include <sys/systm.h>
 #include <sys/types.h>
 #include <sys/hakios.audio.h>
 #include <sys/hakios.input.h>
@@ -43,6 +45,45 @@ void hakios_goodix_init(void) {}
 
 #ifndef HAKIOS_BUTTONS
 void hakios_buttons_init(void) {}
+#endif
+
+/* MediaTek's (mtk/mt6768/drivers/; the TD4160 is the X6826B's, in its device repository) */
+#ifndef HAKIOS_TCM
+void hakios_tcm_init(void) {}
+#endif
+
+#ifndef HAKIOS_MTK_KEYS
+void hakios_mtk_keys_init(void) {}
+#endif
+
+#ifndef HAKIOS_MALI
+void hakios_mali_init(void) {}
+bool hakios_mali_ready(void) { return false; }
+/* nothing keeps lines for the end of the log without it: they are only said */
+void
+hakios_keep(const char *format, ...)
+{
+	char line[200];
+	va_list ap;
+
+	va_start(ap, format);
+	vsnprintf(line, sizeof(line), format, ap);
+	va_end(ap);
+	printf("%s\n", line);
+}
+#endif
+
+#ifndef HAKIOS_MTK_SCP
+void hakios_mtk_scp_init(void) {}
+#endif
+
+#ifndef HAKIOS_MTK_CONNSYS
+void hakios_mtk_connsys_init(void) {}
+#endif
+
+#ifndef HAKIOS_MTK_EMMC
+void hakios_mtk_emmc_devfs(void) {}
+int hakios_mtk_emmc_root(__unused dev_t *root) { return ENXIO; }      /* IOFindBSDRoot then says emmc_root=1 cannot be */
 #endif
 
 #ifndef HAKIOS_UFS

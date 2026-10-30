@@ -42,6 +42,17 @@ void hakios_input_init(void);
 void hakios_virtio_input_init(void);   /* boot-arg virtio_input=1: QEMU's virtio pointer and keyboard */
 void hakios_goodix_init(void);         /* boot-arg touchscreen=1: the phone's Goodix or FocalTech touch screen */
 void hakios_buttons_init(void);        /* boot-arg buttons=1: the phone's power and volume keys */
+/* MediaTek's (mtk/mt6768/drivers/, and the X6826B's touch screen in its device repository) */
+void hakios_tcm_init(void);            /* boot-arg touchscreen=2: a TD4160 touch screen (TCM protocol) on the MT6768's SPI */
+void hakios_mtk_keys_init(void);       /* boot-arg buttons=2: the MT6768's keypad; mtk_cpufreq=, mali_mhz=: its clocks */
+void hakios_mali_init(void);           /* boot-arg mali=1: the MT6768's Mali-G52 brought up */
+bool hakios_mali_ready(void);          /* ... and up: its jobs can be sent */
+void hakios_mtk_scp_init(void);        /* boot-arg scp_step=N: the MT6768's SCP (the sensor hub), steps 1 to N */
+void hakios_mtk_connsys_init(void);    /* boot-arg connsys_step=N: the MT6768's CONNSYS (Wi-Fi/BT), steps 1 to N */
+void hakios_mtk_emmc_devfs(void);      /* /dev/emmc0, /dev/remmc0: the MT6768's eMMC partition xnusys, read only */
+int hakios_mtk_emmc_root(dev_t *root); /* emmc_root=1: that partition as the root; 0 or an errno */
+/* a line kept and said again every minute, so that it reaches the end of a run's log (hakios.mali.c; else only said) */
+void hakios_keep(const char *format, ...) __printflike(1, 2);
 void hakios_ufs_init(void);           /* ufs=2 to xnuloader: the phone's storage, read only, through the loader (ufs_shared_pa=) */
 void hakios_ufs_report(const char *when); /* where reading the storage has spent its time so far */
 bool hakios_ufs_dev(dev_t dev);           /* one of the storage's devices */

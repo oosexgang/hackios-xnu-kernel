@@ -122,6 +122,7 @@ public:
 	struct minisurf_plane           planes[MINISURF_MAX_PLANES];
 	OSDictionary *                  values;
 	uint32_t                        useCount[2];
+	uint64_t                        maliSeq;        /* the last Mali job that draws into it (HakiosMali) */
 	uint32_t                        purgeable;
 	bool                            traced;         /* made by a program of boot-arg surftrace_of: its ports are said too */
 
@@ -165,8 +166,15 @@ void            MiniIOSurfaceCost(uint32_t * made, uint64_t * making, uint32_t *
 void            MiniIOSurfaceClearKept(void);
 /* Wait, for so many milliseconds at most, until the GPU is done with a surface's pixels (hakios.gpu.cpp). */
 bool            MiniIOSurfaceDrawn(MiniIOSurface * surface, uint64_t milliseconds);
+/* ... the Mali's part of that: its last job into the surface done (mtk/mt6768/drivers/gpu/hakios.mali.cpp; yes when none) */
+bool            hakios_mali_surface_drawn(MiniIOSurface * surface, uint64_t milliseconds);
 MiniIOSurface * MiniIOSurfaceCreateSimple(uint32_t width, uint32_t height, uint32_t pixelFormat);
 void            MiniIOSurfaceDrop(MiniIOSurface * surface);
+/*
+ * The surface counted in use (IOSurfaceIsInUse()) while a swap holds it, as the display holds one on
+ * an iPhone: CoreAnimation does not draw the next frame into it before it is on the panel.
+ */
+void            MiniIOSurfaceUse(MiniIOSurface * surface, int delta);
 /* A Mach send right for the surface in the task (what IOSurfaceCreateMachPort gives); 0 on failure. */
 mach_port_name_t MiniIOSurfaceMakeSendRight(task_t task, MiniIOSurface * surface);
 

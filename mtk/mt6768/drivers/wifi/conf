@@ -1,0 +1,9 @@
+# mtk/mt6768/drivers/wifi/conf: CONNSYS, the MT6768's Wi-Fi and Bluetooth subsystem.
+# CONFIG_HAKIOS_<NAME>=y in a defconfig builds a driver into the kernel (docs/drivers-config.md). MediaTek's drivers are
+# `default n`: a configuration has them only when it includes mt6768.config.
+
+driver MTK_CONNSYS
+	file    bsd/dev/hakios.mtk_connsys.c
+	default n
+	help    CONNSYS step by step (connsys_step=N): its power, its firmware into its memory (/fw/connsys/ of the root, from
+	help    the phone: fw-connsys/), BTIF, STP and the WMT command channel (connsys_step=8). No network yet

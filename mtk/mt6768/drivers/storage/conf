@@ -1,0 +1,9 @@
+# mtk/mt6768/drivers/storage/conf: the MT6768's storage.
+# CONFIG_HAKIOS_<NAME>=y in a defconfig builds a driver into the kernel (docs/drivers-config.md). MediaTek's drivers are
+# `default n`: a configuration has them only when it includes mt6768.config.
+
+driver MTK_EMMC
+	file    bsd/dev/hakios.mtk_emmc.c
+	default n
+	help    the eMMC through the MT6768's MSDC0, read only: the partition "xnusys" as /dev/emmc0, and with emmc_root=1 the root
+	help    (the system image read as it is needed instead of held in memory). LK and mtkloader leave the card set up

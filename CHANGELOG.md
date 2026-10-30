@@ -18,6 +18,12 @@ changes to it; the scripts named fetch the release and put the changes on.
 
 ## 2026-10-30
 
+- mediatek: `mtk/`, the MediaTek part of the tree, and `mtk/mt6768/`, the Helio G85's SoC layer: its eMMC (read only, the root with `emmc_root=1`), keypad and clocks, the SCP's accelerometer, the Mali-G52 and CONNSYS as drivers `CONFIG_HAKIOS_MTK_*`, `MALI`, `TCM` (`default n`); `make x6826b_defconfig && make kernel` builds the Infinix Hot 20's kernel ([mtk/README.md](mtk/README.md))
+- display: `fbfit=`, `fb_flip=1`, `fbshot=`, `fb_inuse=1`, `fb_flicker=1`, `fbxr=1` (from the MediaTek port); IOSurface: `surf_align=1`, `surf_lockwait=1` -- all off unless asked for, the POCO's defaults unchanged
+- boot: the loader's second RAM disk is `md1` even when there is no `md0`
+- build: `make kernel` on macOS -- the CPU count by `sysctl` where there is no `nproc`, and GNU Make 3.81's messages taken by `tools/make-kernel.sh`
+- configuration: the arguments of a SoC's or device's own drivers are known to the checks (`touchscreen=` read by a device's touch driver is not refused); `fb_measure=` and `var_hfs=` in the catalogue
+
 - repositories: `main` is the branch of `hakios-xnu-kernel` -- what was `hakios` and then `u-boot`; `hakios` is gone, `git clone` needs no `-b`
 - site: a Changelog page, this file
 - site: the commands to start with clone the public repository (`hakios-xnu-kernel`); `oosexgang/hakios` is private and cloned for nobody

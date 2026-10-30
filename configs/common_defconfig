@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 341 symbols in 18 groups; 34 are set, 25 of them drivers built in.
+# 370 symbols in 18 groups; 34 are set, 25 of them drivers built in.
 #
 
 #
@@ -19,7 +19,7 @@
 CONFIG_FIRMWARE="device"
 
 #
-# Drivers built in (25)
+# Drivers built in (31)
 #
 
 # the audio DSP started and linked (adsp=1, adsp_step=N); the battery's state comes through it too. Needs the DSP's ... [hakios.adsp.c]
@@ -97,8 +97,26 @@ CONFIG_HAKIOS_VIRTIO_BLK=y
 # Wi-Fi of the WCN6750 (wifi=1, wifi_step=N): the DSP that runs the radio's firmware, Linux's ath11k (its object, made ... [hakios.wifi.c, hakios.wlfw.c, hakios.lx.c, hakios.sta.c, hakios.apple80211.c, hakios.wlan.cpp; requires CONFIG_HAKIOS_QMI]
 CONFIG_HAKIOS_WIFI=y
 
+# the Mali-G52 MC2 brought up from the kernel (mali=1): power domains, clocks, its MMU, a queue of jobs; and ... [hakios.mali.c, hakios.mali.cpp]
+# CONFIG_HAKIOS_MALI is not set
+
+# the power and volume keys through the keypad at 0x10010000 and the PMIC's power key (buttons=2), and the clocks of ... [hakios.mtk_keys.c]
+# CONFIG_HAKIOS_MTK_KEYS is not set
+
+# the SCP, the MT6768's sensor processor, started step by step (scp_step=N): its firmware's sensor hub, the ... [hakios.mtk_scp.c]
+# CONFIG_HAKIOS_MTK_SCP is not set
+
+# the touch screen of the Infinix Hot 20 (x6826b): an OmniVision TD4160 on the MT6768's SPI2, TCM protocol ... [hakios.tcm.c]
+# CONFIG_HAKIOS_TCM is not set
+
+# the eMMC through the MT6768's MSDC0, read only: the partition "xnusys" as /dev/emmc0, and with emmc_root=1 the root ... [hakios.mtk_emmc.c]
+# CONFIG_HAKIOS_MTK_EMMC is not set
+
+# CONNSYS step by step (connsys_step=N): its power, its firmware into its memory (/fw/connsys/ of the root, from the ... [hakios.mtk_connsys.c]
+# CONFIG_HAKIOS_MTK_CONNSYS is not set
+
 #
-# CPU, memory and boot (21)
+# CPU, memory and boot (22)
 #
 
 # CPU cores the kernel uses, 1 to 8; one if not set
@@ -127,6 +145,9 @@ CONFIG_HAKIOS_WIFI=y
 
 # read by hakios.cpufreq.c (kernel)
 # CONFIG_DDR_VOTE is not set
+
+# read by the patch to Apple's files (kernel)
+# CONFIG_EMMC_ROOT is not set
 
 # read by GenericARMPE.cpp (kernel)
 # CONFIG_MACHINE_NAME is not set
@@ -301,22 +322,34 @@ CONFIG_UFS=2
 # CONFIG_VIRTIO_BLK is not set
 
 #
-# Touch and buttons (8)
+# Touch and buttons (12)
 #
 
 # the touch screen, and the power and volume buttons
 CONFIG_TOUCHSCREEN=y
 
-# read by hakios.buttons.c (kernel)
+# read by hakios.buttons.c, hakios.mtk_keys.c (kernel)
 # CONFIG_BUTTONS is not set
 
 # read by hakios.buttons.c (kernel)
 # CONFIG_BUTTONS_STEPS is not set
 
+# a line for every change, to check the wiring against
+# CONFIG_KEYLOG is not set
+
+# read by hakios.mtk_keys.c (kernel)
+# CONFIG_MALI_MHZ is not set
+
+# read by hakios.mtk_keys.c (kernel)
+# CONFIG_MTK_CPUFREQ is not set
+
+# read by hakios.mtk_scp.c (kernel)
+# CONFIG_SCP_STEP is not set
+
 # read by hakios.goodix.c (kernel)
 # CONFIG_TOUCH_FLIP is not set
 
-# read by hakios.goodix.c (kernel)
+# read by hakios.goodix.c, hakios.tcm.c (kernel)
 # CONFIG_TOUCH_POLL_US is not set
 
 # the chip reports twice as often (Xiaomi's game mode; 240 otherwise)
@@ -329,7 +362,7 @@ CONFIG_TOUCHSCREEN=y
 # CONFIG_VIRTIO_INPUT is not set
 
 #
-# GPU and display (68)
+# GPU and display (84)
 #
 
 # rendering on Adreno (an image built with GL=1; the GPU's firmware from your phone) [needs fw-gpu/ from the phone]
@@ -384,7 +417,19 @@ CONFIG_GPU=y
 # CONFIG_FB_FILTER is not set
 
 # read by MiniIOMobileFramebuffer.cpp (kernel)
+# CONFIG_FB_FLICKER is not set
+
+# two of the boot framebuffer's pictures, drawn in turn, the panel's scanout (OVL0 layer 0) pointed at the finished ...
+# CONFIG_FB_FLIP is not set
+
+# read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_FB_HZ is not set
+
+# a swap's surfaces are counted in use while they wait for the panel, as on an iPhone: CoreAnimation took a surface ...
+# CONFIG_FB_INUSE is not set
+
+# how often the panel is really refreshed
+# CONFIG_FB_MEASURE is not set
 
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_FB_QUEUE is not set
@@ -392,17 +437,38 @@ CONFIG_GPU=y
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_FB_THREADS is not set
 
+# keep the iPhone's proportions on a taller panel, black bands above and below
+# CONFIG_FBFIT is not set
+
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_FBHEIGHT is not set
 
 # the same 375 x 812 points drawn at two pixels a point instead of three
 # CONFIG_FBSCALE is not set
 
+# the frame, 60 pixels wide, red green blue, in base64 on lines that begin "fbshot N:" (tools/fbshot.py makes a ...
+# CONFIG_FBSHOT is not set
+
+# read by MiniIOMobileFramebuffer.cpp (kernel)
+# CONFIG_FBSHOT_BAND is not set
+
+# read by MiniIOMobileFramebuffer.cpp (kernel)
+# CONFIG_FBSHOT_EVERY is not set
+
+# read by MiniIOMobileFramebuffer.cpp (kernel)
+# CONFIG_FBSHOT_PANEL is not set
+
+# read by MiniIOMobileFramebuffer.cpp (kernel)
+# CONFIG_FBSHOT_W is not set
+
 # log the first N calls of every selector (default 3)
 # CONFIG_FBTRACE is not set
 
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_FBWIDTH is not set
+
+# read by MiniIOMobileFramebuffer.cpp (kernel)
+# CONFIG_FBXR is not set
 
 # the surface's memory, as before
 # CONFIG_GLBLIT is not set
@@ -503,6 +569,15 @@ CONFIG_GPU=y
 # read by hakios.adreno.c (kernel)
 # CONFIG_GPU_LOG is not set
 
+# every address below belongs to this phone (the other phone's GPU is an Adreno, bsd/dev/hakios.adreno.c)
+# CONFIG_MALI is not set
+
+# read by hakios.mali.c (kernel)
+# CONFIG_MALI_FASTMAP is not set
+
+# a line for every job, "tl: j SEQ f|v q QUEUED b BEGAN e ENDED" in us of mach_absolute_time, beside touch_lat's lines ...
+# CONFIG_MALI_TRACE is not set
+
 # only the program metal_test (userland/src/metal_test.m): the safe level, for seeing what Metal does with the device
 # CONFIG_METAL is not set
 
@@ -521,8 +596,14 @@ CONFIG_GPU=y
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_REC_STEP is not set
 
+# read by MiniIOSurface.cpp (kernel)
+# CONFIG_SURF_ALIGN is not set
+
 # kept memory is given out as it is (to see what the clearing costs; a surface is then not all zeroes)
 # CONFIG_SURF_CLEAR is not set
+
+# a lock waits until the GPU is done with the surface (lockCommon); the X6826B's configuration turns it on
+# CONFIG_SURF_LOCKWAIT is not set
 
 # log the first N surfaces created (default 24)
 # CONFIG_SURFTRACE is not set
@@ -637,11 +718,14 @@ CONFIG_SOUND=4
 # CONFIG_VIRTIO_SOUND is not set
 
 #
-# Wi-Fi (31)
+# Wi-Fi (32)
 #
 
 # Wi-Fi: the radio, its driver, a connection (also fw-wifi/mac and fw-wifi/network) [needs fw-wifi/ from the phone]
 CONFIG_WIFI=y
+
+# read by hakios.mtk_connsys.c (kernel)
+# CONFIG_CONNSYS_STEP is not set
 
 # start the DSP although the one before it was shut down without having acknowledged a stop: THAT HAS RESET THE PHONE, ...
 # CONFIG_WIFI_AGAIN is not set
@@ -1051,7 +1135,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_PROBE is not set
 
 #
-# User space (13)
+# User space (14)
 #
 
 # read by inject_sb.c (user space)
@@ -1092,6 +1176,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by inject_sb.c (user space)
 # CONFIG_SWITCHER_WALLPAPER is not set
+
+# read by init.c (user space)
+# CONFIG_VAR_HFS is not set
 
 #
 # Extra arguments (1)

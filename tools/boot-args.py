@@ -58,14 +58,14 @@ USER = re.compile(r'strstr\(\s*(?:arguments|args|argument)\s*,\s*"([a-z][a-z0-9_
 
 # the group an argument is listed under: by the file that reads it (the first match decides)
 GROUPS = [
-    ("GPU and display", r"hakios\.(adreno|gpu)\.|MiniIO(Surface|MobileFramebuffer)|gl_osmesa|eagl\.c"),
+    ("GPU and display", r"hakios\.(adreno|gpu|mali)\.|MiniIO(Surface|MobileFramebuffer)|gl_osmesa|eagl\.c"),
     ("Security stand-ins", r"kern_minimac|miniamfi"),
-    ("Wi-Fi", r"hakios\.(wifi|wlfw|lx|sta|apple80211)\.|^lx_[a-z0-9]+\.c$"),     # wifi/lx/src/lx_*.c: the Linux layer
+    ("Wi-Fi", r"hakios\.(wifi|wlfw|lx|sta|apple80211|mtk_connsys)\.|^lx_[a-z0-9]+\.c$"),     # wifi/lx/src/lx_*.c: the Linux layer
     ("Cellular", r"hakios\.(mpss|ipa|cell|nas|qmi)\."),
     ("Audio and battery", r"hakios\.(adsp|audio|sound|speaker|mic|virtio_sound|battery|battguard)\."),
     ("Cameras", r"hakios\.camera\."),
-    ("Touch and buttons", r"hakios\.(goodix|input|buttons|virtio_input)\."),
-    ("Storage and APFS", r"hakios\.(ufs|ufshc|virtio_blk|sparse|apfs_check)\.|apfs_vfsops\."),
+    ("Touch and buttons", r"hakios\.(goodix|input|buttons|virtio_input|mtk_keys|mtk_scp)\."),
+    ("Storage and APFS", r"hakios\.(ufs|ufshc|virtio_blk|sparse|apfs_check|mtk_emmc)\.|apfs_vfsops\."),
     ("Network", r"hakios\.(net|virtio_net)\."),
     ("Haptics and torch", r"hakios\.(haptic|torch)\."),
     ("Chip, thermal and PMIC", r"hakios\.(socinfo|thermal|pmic)\."),
@@ -120,7 +120,7 @@ def scan(root, keep=None):
             text = "\n".join(l[1:] for l in text.splitlines() if l.startswith("+") and not l.startswith("+++"))
             base = "(patch)"
         # the kernel's side: where the drivers are kept (xnu/files/ until they moved to drivers/<subsystem>/) and the Linux layer
-        if f.startswith(("xnu/", "drivers/", "wifi/lx/src/")):
+        if f.startswith(("xnu/", "drivers/", "wifi/lx/src/", "mtk/")):
             for m in KERNEL.finditer(text):
                 found[m.group(1)]["kernel"].add(base)
             for m in STRING.finditer(text):
