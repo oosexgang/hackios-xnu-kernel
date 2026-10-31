@@ -16,10 +16,11 @@ cd "$(dirname "$0")/.." || exit 1
 KERNEL=${KERNEL:-xnu-src/xnu-8796.121.2/BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837}
 
 # the make targets that failed, less the ones that are the symbol-set steps and the targets that only
-# stand above them (config_all and the recursion into config/, and the top-level `all`)
+# stand above them (config_all and the recursion into config/, and the top-level `all`). GNU make 4 names the makefile's line
+# in a failed target ([Makefile:12: all]); macOS's make 3.81 does not ([all]).
 unexpected_failures() {
 	grep -E '^make(\[[0-9]+\])?: \*\*\* ' "$1" |
-		grep -vE '\.symbolset\]|check_all_exports|config_all|_recurse_into_config|\[Makefile:[0-9]+: all\]|^make: \*\*\* \[all\] Error'
+		grep -vE '\.symbolset\]|check_all_exports|config_all|_recurse_into_config|\[(Makefile:[0-9]+: )?all\] Error'
 }
 
 judge() { # judge LOG: 0 if the kernel is built and only the symbol-set steps failed

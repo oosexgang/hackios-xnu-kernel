@@ -60,7 +60,11 @@
  */
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
+#include <dlfcn.h>
+#include <mach/mach.h>
+#include <pthread.h>
 #include <IOSurface/IOSurfaceRef.h>
+#include <libkern/OSByteOrder.h>
 #include <mach/mach_time.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
@@ -234,6 +238,7 @@ struct image {
 	bool painted;                   /* something has been drawn into it (it is a target in fact, not only in name) */
 	unsigned looked;                /* ... the frame in which that memory was last looked at, */
 	uint64_t sum;                   /* ... and what it added up to */
+	unsigned unchanged;             /* ... and how many looks in a row found it the same (surface_changed()) */
 	GLenum to, internal, format, type;
 	uint32_t plane, seed;
 	GLsizei width, height;
@@ -630,6 +635,17 @@ surface_shared(struct eagl *e, struct image *image)
 	    image->plane != 0 || (size_t)image->width != IOSurfaceGetWidth(surface) ||
 	    (size_t)image->height != IOSurfaceGetHeight(surface) ||
 	    !hakios_gl_surface_texture(e->gl, IOSurfaceGetID(surface))) {
+		/* why a surface is copied rather than its memory used: the first ones of a run, for the copies to be made fewer */
+		if (e->refused < 40) {
+			say("hakios-gl: surface %u ('%.4s' %zu x %zu) copied, not shared: %s%s%s%s%s%s\n", IOSurfaceGetID(surface),
+			    (const char *)&(uint32_t){ OSSwapInt32(IOSurfaceGetPixelFormat(surface)) }, IOSurfaceGetWidth(surface),
+			    IOSurfaceGetHeight(surface), !share_surfaces ? "sharing off; " : "", image->invert ? "turned over; " : "",
+			    image->alpha_first ? "alpha first; " : "",
+			    image->format != GL_BGRA || image->type != GL_UNSIGNED_BYTE ? "not BGRA bytes; " : "",
+			    image->plane != 0 ? "a plane; " : "",
+			    (size_t)image->width != IOSurfaceGetWidth(surface) || (size_t)image->height != IOSurfaceGetHeight(surface) ?
+			    "a part of it; " : "(the library refused)");
+		}
 		e->refused++;
 		return false;
 	}
@@ -645,7 +661,16 @@ surface_shared(struct eagl *e, struct image *image)
  * made again. A GPU that has the memory itself shows what is there. A copy has to notice: once
  * a frame, when the texture is about to be drawn with, the memory is added up, and copied again
  * if the sum has changed.
+ * Most of them never change -- the wallpaper, the icons, the pictures CoreAnimation has made surfaces around
+ * (MiniIOSurface's methodWrapClientImage) -- and adding all of them up every frame took more than half of the drawing
+ * thread's time (glprof: the wallpaper alone is 11 MB). One that has been the same STILL_LOOKS looks in a row (about a
+ * second) is looked at every STILL_EVERY frames only, each in a frame of its own (by its surface's number); the first
+ * change seen makes it looked at every frame again. A still picture that does change is seen at most STILL_EVERY frames
+ * late (67 ms); what keeps changing, a picture a program animates, is looked at every frame.
  */
+#define STILL_LOOKS     120
+#define STILL_EVERY     8
+static int still_seldom = 1;                    /* boot-arg glstill=0: every surface looked at every frame (for comparing) */
 static bool
 surface_changed(struct eagl *e, struct image *image)
 {
@@ -658,6 +683,9 @@ surface_changed(struct eagl *e, struct image *image)
 	if (image->looked == e->frames + 1 || base == NULL || IOSurfaceGetPlaneCount(surface) > 0) {
 		return false;
 	}
+	if (still_seldom && image->unchanged >= STILL_LOOKS && (e->frames + IOSurfaceGetID(surface)) % STILL_EVERY != 0) {
+		return false;
+	}
 	image->looked = e->frames + 1;
 	for (size_t at = 0; at + 8 <= size; at += 8) {
 		memcpy(&word, base + at, 8);
@@ -665,9 +693,11 @@ surface_changed(struct eagl *e, struct image *image)
 		sum ^= sum >> 29;
 	}
 	if (sum == image->sum) {
+		image->unchanged += image->unchanged < STILL_LOOKS;
 		return false;
 	}
 	image->sum = sum;
+	image->unchanged = 0;
 	return true;
 }
 
@@ -967,6 +997,115 @@ show_texture(struct eagl *e, struct image *image)
 	free(pixels);
 }
 
+/*
+ * Where the window server's drawing thread spends its processor time (boot-arg glprof=US): a thread of its own looks at
+ * the drawing thread every US microseconds, and when that one is on a processor (not waiting) takes its program counter.
+ * Every PROF_DUMP of them the most frequent go to the log as "hakios-prof: IMAGE+0xOFFSET N%", for symbolizing on the
+ * build machine against the unstripped libraries (libOSMesa's is in xnu-deps/build/mesa/build-*). The frame took 6 to
+ * 7 ms of the processor at 146 draws (tools/frames.py): this says in what.
+ * While the drawing thread is held (thread_suspend) nothing here allocates or takes a lock: it may hold malloc's.
+ */
+#define PROF_SLOTS      8192
+#define PROF_DUMP       4000
+#define PROF_SHOWN      30
+#define PROF_DEPTH      9                       /* the program counter, the link register, seven callers from the frame chain */
+static unsigned prof_us;                        /* 0: no profile */
+static thread_t prof_thread;                    /* the drawing thread, the first that begins a frame */
+static struct {
+	uint64_t stack[PROF_DEPTH];
+	unsigned count;
+} prof_table[PROF_SLOTS];
+
+static int
+prof_by_count(const void *a, const void *b)
+{
+	const typeof(prof_table[0]) *x = a, *y = b;
+
+	return (int)y->count - (int)x->count;
+}
+
+static void *
+prof_main(__unused void *argument)
+{
+	unsigned taken = 0, looks = 0;
+
+	for (;;) {
+		thread_basic_info_data_t basic;
+		mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+		arm_thread_state64_t state;
+		mach_msg_type_number_t state_count = ARM_THREAD_STATE64_COUNT;
+
+		usleep(prof_us);
+		looks++;
+		if (thread_info(prof_thread, THREAD_BASIC_INFO, (thread_info_t)&basic, &count) != KERN_SUCCESS ||
+		    basic.run_state != TH_STATE_RUNNING) {
+			continue;
+		}
+		if (thread_suspend(prof_thread) != KERN_SUCCESS) {
+			continue;
+		}
+		kern_return_t got = thread_get_state(prof_thread, ARM_THREAD_STATE64, (thread_state_t)&state, &state_count);
+		thread_resume(prof_thread);
+		if (got != KERN_SUCCESS) {
+			continue;
+		}
+		/*
+		 * The stack as far as PROF_DEPTH: the program counter, the link register (a leaf such as a system call's stub has
+		 * pushed no frame of its own) and the return addresses of the frame records the frame pointer leads through --
+		 * each checked to lie above the stack pointer and within a megabyte of it, and to go upwards, before it is read.
+		 */
+		uint64_t stack[PROF_DEPTH] = { arm_thread_state64_get_pc(state), arm_thread_state64_get_lr(state) };
+		uint64_t sp = arm_thread_state64_get_sp(state), fp = arm_thread_state64_get_fp(state), hash = 0;
+
+		for (unsigned depth = 2; depth < PROF_DEPTH && fp >= sp && fp < sp + (1u << 20) && (fp & 15) == 0; depth++) {
+			const uint64_t *record = (const uint64_t *)(uintptr_t)fp;
+
+			stack[depth] = record[1];
+			if (record[0] <= fp) {
+				break;
+			}
+			fp = record[0];
+		}
+		for (unsigned depth = 0; depth < PROF_DEPTH; depth++) {
+			hash = (hash ^ stack[depth]) * 0x9e3779b97f4a7c15ull;
+		}
+		for (unsigned i = (unsigned)(hash >> 32) % PROF_SLOTS, probes = 0; probes < PROF_SLOTS; i = (i + 1) % PROF_SLOTS, probes++) {
+			if (prof_table[i].count == 0 || memcmp(prof_table[i].stack, stack, sizeof(stack)) == 0) {
+				memcpy(prof_table[i].stack, stack, sizeof(stack));
+				prof_table[i].count++;
+				break;
+			}
+		}
+		if (++taken < PROF_DUMP) {
+			continue;
+		}
+		/* the most frequent first, each as its image and the offset in it (dladdr: not while the thread was held) */
+		qsort(prof_table, PROF_SLOTS, sizeof(prof_table[0]), prof_by_count);
+		say("hakios-prof: %u samples of the drawing thread on a processor, in %u looks:\n", taken, looks);
+		for (unsigned i = 0; i < PROF_SHOWN && prof_table[i].count != 0; i++) {
+			char line[1024];
+			int at = snprintf(line, sizeof(line), "hakios-prof: %.1f%%", 100.0 * prof_table[i].count / taken);
+
+			for (unsigned depth = 0; depth < PROF_DEPTH && prof_table[i].stack[depth] != 0 && at < (int)sizeof(line); depth++) {
+				Dl_info where = { 0 };
+				const char *image = "?", *slash;
+				uint64_t offset = prof_table[i].stack[depth];
+
+				if (dladdr((void *)(uintptr_t)offset, &where) != 0 && where.dli_fname != NULL) {
+					image = (slash = strrchr(where.dli_fname, '/')) != NULL ? slash + 1 : where.dli_fname;
+					offset -= (uint64_t)(uintptr_t)where.dli_fbase;
+				}
+				at += snprintf(line + at, sizeof(line) - (size_t)at, " %s%s+0x%llx(%s)", depth ? "<- " : "", image,
+				    (unsigned long long)offset, where.dli_sname != NULL ? where.dli_sname : "?");
+			}
+			say("%s\n", line);
+		}
+		memset(prof_table, 0, sizeof(prof_table));
+		taken = looks = 0;
+	}
+	return NULL;
+}
+
 /* Before the first drawing of a frame: the textures whose IOSurfaces somebody has written to since. */
 static void
 frame_begin(struct eagl *e)
@@ -979,6 +1118,13 @@ frame_begin(struct eagl *e)
 	}
 	e->in_frame = true;
 	e->began = now_us();
+	if (prof_us != 0 && prof_thread == MACH_PORT_NULL) {
+		pthread_t sampler;
+
+		prof_thread = mach_thread_self();
+		pthread_create(&sampler, NULL, prof_main, NULL);
+		say("hakios-gl: the drawing thread's profile, a look every %u us (glprof)\n", prof_us);
+	}
 	eagl_tracing = e->frames + 1 >= trace_first && e->frames + 1 <= trace_last;
 	if ((trace_at != 0 && e->began >= trace_at) || (trace_draws != 0 && e->last_draws == trace_draws) || trace_function_met) {
 		trace_left = trace_frames;      /* (once) */
@@ -1077,8 +1223,15 @@ frame_end(struct eagl *e, bool finished)
 	e->in_frame = false;
 	e->frames++;
 	if (latency_lines) {
-		/* "tl: g FRAME began US ended US DRAWS": microseconds of mach_absolute_time (tools/latency.py) */
-		say("tl: g %u began %llu ended %llu %u\n", e->frames, e->began, after, e->draws);
+		uint64_t tpidr;
+
+		/*
+		 * "tl: g FRAME began US ended US DRAWS cpu N": microseconds of mach_absolute_time (tools/latency.py), and the
+		 * core the frame ended on, which the kernel keeps in TPIDR_EL0's low bits as libsyscall's _os_cpu_number()
+		 * reads it (tools/frames.py: whether the slow frames were drawn on the small cores)
+		 */
+		__asm__ volatile ("mrs %0, TPIDR_EL0" : "=r" (tpidr));
+		say("tl: g %u began %llu ended %llu %u cpu %u\n", e->frames, e->began, after, e->draws, (unsigned)(tpidr & 0xfff));
 	}
 	if (frame_lines) {
 		/*
@@ -4117,6 +4270,10 @@ install(void)
 		census_on = strstr(arguments, "glcensus=1") != NULL;
 		frame_lines = strstr(arguments, "glframes=1") != NULL;
 		latency_lines = strstr(arguments, "touch_lat=1") != NULL;
+		still_seldom = strstr(arguments, "glstill=0") == NULL;
+		if ((argument = strstr(arguments, "glprof=")) != NULL) {
+			prof_us = (unsigned)strtoul(argument + 7, NULL, 10);    /* (frame_begin() starts the profile: prof_main()) */
+		}
 		if ((argument = strstr(arguments, "glslow=")) != NULL) {
 			slow_calls_us = strtoull(argument + 7, NULL, 10);
 		}

@@ -1,0 +1,8 @@
+# Commands run by the launchd job com.hakios.demo (see com.hakios.demo.plist).
+# Frame rate while a finger moves (RC_JOBS=rc.jobs.scroll, touch_lat=1, a run of about 110 s, short enough for the log to
+# keep it all): unlock; the home screen's pages swiped both ways six times; Settings opened and its list dragged up and
+# down by a finger that stays on the glass (zigzag) and flung; closed. What CoreAnimation believes of the screen last.
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 8
+/redwood/bin/rwtouch swipe 0.85 0.5 0.15 0.5 300 wait 1 swipe 0.15 0.5 0.85 0.5 300 wait 1 swipe 0.85 0.5 0.15 0.5 300 wait 1 swipe 0.15 0.5 0.85 0.5 300 wait 1 swipe 0.85 0.5 0.15 0.5 300 wait 1 swipe 0.15 0.5 0.85 0.5 300 wait 2
+/redwood/bin/rwtouch tap 0.615 0.71 wait 5 zigzag 0.5 0.75 0.35 500 6 wait 2 swipe 0.5 0.8 0.5 0.3 150 wait 2 swipe 0.5 0.3 0.5 0.8 150 wait 2 button home wait 3
+/redwood/bin/fps_info

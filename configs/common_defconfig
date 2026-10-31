@@ -2,7 +2,7 @@
 # HakiOS common defconfig: every setting there is, with what it does.
 # Made by tools/hakios-config.py listing common -o <this file>; the values are the ones that file sets, and tests/CI check that it names every symbol.
 #
-# 341 symbols in 18 groups; 34 are set, 25 of them drivers built in.
+# 350 symbols in 18 groups; 34 are set, 25 of them drivers built in.
 #
 
 #
@@ -301,7 +301,7 @@ CONFIG_UFS=2
 # CONFIG_VIRTIO_BLK is not set
 
 #
-# Touch and buttons (8)
+# Touch and buttons (10)
 #
 
 # the touch screen, and the power and volume buttons
@@ -312,6 +312,12 @@ CONFIG_TOUCHSCREEN=y
 
 # read by hakios.buttons.c (kernel)
 # CONFIG_BUTTONS_STEPS is not set
+
+# a short press of the power key that many seconds after boot, and another ten seconds later, given to Darwin as the ...
+# CONFIG_PRESS_POWER is not set
+
+# read by hakios.buttons.c (kernel)
+# CONFIG_PRESS_POWER_MS is not set
 
 # read by hakios.goodix.c (kernel)
 # CONFIG_TOUCH_FLIP is not set
@@ -329,7 +335,7 @@ CONFIG_TOUCHSCREEN=y
 # CONFIG_VIRTIO_INPUT is not set
 
 #
-# GPU and display (68)
+# GPU and display (74)
 #
 
 # rendering on Adreno (an image built with GL=1; the GPU's firmware from your phone) [needs fw-gpu/ from the phone]
@@ -377,6 +383,9 @@ CONFIG_GPU=y
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_FB_BEAT is not set
 
+# the refresh rate told to CoreAnimation (IOMFBDisplayRefresh) when it is not to be fb_hz's
+# CONFIG_FB_CA_HZ is not set
+
 # which pixels of the panel each frame changed (it costs: the panel's memory is slow to read)
 # CONFIG_FB_DIFF is not set
 
@@ -385,6 +394,12 @@ CONFIG_GPU=y
 
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_FB_HZ is not set
+
+# how often the panel is really refreshed
+# CONFIG_FB_MEASURE is not set
+
+# read by MiniIOMobileFramebuffer.cpp (kernel)
+# CONFIG_FB_PRI is not set
 
 # read by MiniIOMobileFramebuffer.cpp (kernel)
 # CONFIG_FB_QUEUE is not set
@@ -435,6 +450,9 @@ CONFIG_GPU=y
 # CONFIG_GLPRECISION is not set
 
 # read by eagl.c (user space)
+# CONFIG_GLPROF is not set
+
+# read by eagl.c (user space)
 # CONFIG_GLSHADERS is not set
 
 # the first texture of that size there is (names are handed out afresh every run)
@@ -451,6 +469,9 @@ CONFIG_GPU=y
 
 # read by eagl.c (user space)
 # CONFIG_GLSLOW is not set
+
+# read by eagl.c (user space)
+# CONFIG_GLSTILL is not set
 
 # read by eagl.c (user space)
 # CONFIG_GLSYNC is not set
@@ -523,6 +544,9 @@ CONFIG_GPU=y
 
 # kept memory is given out as it is (to see what the clearing costs; a surface is then not all zeroes)
 # CONFIG_SURF_CLEAR is not set
+
+# surfaces around the client's pictures refused, as before methodWrapClientImage (for comparing)
+# CONFIG_SURF_WRAP is not set
 
 # log the first N surfaces created (default 24)
 # CONFIG_SURFTRACE is not set
@@ -1051,7 +1075,7 @@ CONFIG_MODEM_AGAIN=y
 # CONFIG_UFS_PROBE is not set
 
 #
-# User space (13)
+# User space (14)
 #
 
 # read by inject_sb.c (user space)
@@ -1066,7 +1090,7 @@ CONFIG_MODEM_AGAIN=y
 # CoreAnimation's frame clock from the display driver's refresh notifications
 # CONFIG_CA_VBL is not set
 
-# read by inject.c (user space)
+# CoreAnimation's switches here as in the window server (inject.c), set before QuartzCore reads them
 # CONFIG_CAENV is not set
 
 # read by inject_sb.c (user space)
@@ -1092,6 +1116,9 @@ CONFIG_MODEM_AGAIN=y
 
 # read by inject_sb.c (user space)
 # CONFIG_SWITCHER_WALLPAPER is not set
+
+# read by init.c (user space)
+# CONFIG_VAR_HFS is not set
 
 #
 # Extra arguments (1)

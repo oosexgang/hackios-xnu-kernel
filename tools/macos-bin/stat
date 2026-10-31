@@ -1,2 +1,11 @@
 #!/bin/sh
-exec /opt/local/bin/gstat "$@"
+# GNU stat for xl and the tools: MacPorts' gstat when it is there, else macOS's own for what they ask (stat -c %s|%Y FILE)
+[ -x /opt/local/bin/gstat ] && exec /opt/local/bin/gstat "$@"
+command -v gstat >/dev/null 2>&1 && exec gstat "$@"
+if [ "$1" = -c ]; then
+	case "$2" in
+	%s) shift 2; exec /usr/bin/stat -f %z "$@" ;;
+	%Y) shift 2; exec /usr/bin/stat -f %m "$@" ;;
+	esac
+fi
+exec /usr/bin/stat "$@"

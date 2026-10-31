@@ -1120,6 +1120,13 @@ hakios_init(void)
 			setting[length] = 0;
 			if ((equals = strchr(setting, '=')) != NULL) {
 				*equals = 0;
+				/* a fraction is written 0p25: the boot-arguments lose what follows a "." of a number (0.008 came as 0) */
+				for (char *point = equals + 1; *point != 0; point++) {
+					if (*point == 'p' && point > equals + 1 && point[-1] >= '0' && point[-1] <= '9' && point[1] >= '0' && point[1] <= '9') {
+						*point = '.';
+						break;
+					}
+				}
 				setenv(setting, equals + 1, 1);
 				say("hakios: caenv: %s=%s for the window server\n", setting, equals + 1);
 			}

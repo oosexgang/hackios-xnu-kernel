@@ -132,9 +132,20 @@ stage1() {
 	if [ "$XNU_HOST_OS" = Darwin ]; then
 		# macOS has it all: mig (Xcode's; it takes $MIGCC and $MIGCOM from the kernel build), unifdef, csh
 		link "$(/usr/bin/xcrun -f mig)" host/bin/mig
-		link "$(/usr/bin/xcrun -f migcom)" host/bin/migcom
+		# with the command-line tools alone, migcom is in usr/libexec, where xcrun does not look (and xcrun must not find
+		# host/bin's own link on the PATH)
+		migcom=$(xcode-select -p)/usr/libexec/migcom
+		[ -x "$migcom" ] || migcom=$(PATH=/usr/bin:/bin /usr/bin/xcrun -f migcom)
+		link "$migcom" host/bin/migcom
 		link /usr/bin/unifdef host/bin/unifdef
 		link /bin/tcsh host/bin/tcsh
+		# what XNU's makefiles call by Linux's names: GNU's nproc (MakeInc.cmd's job count) and python
+		printf '#!/bin/sh\n# nproc as GNU coreutils has it, on macOS\nexec sysctl -n hw.ncpu\n' | update host/bin/nproc
+		chmod +x host/bin/nproc
+		# (a script, not a link: /usr/bin/python3 is a shim that looks for the tool its own name says, and "python" there is none)
+		rm -f host/bin/python
+		printf '#!/bin/sh\nexec python3 "$@"\n' | update host/bin/python
+		chmod +x host/bin/python
 	fi
 	# mig: Apple's own does not build on glibc; this is a port that does
 	if [ ! -x host/bin/migcom ] || [ ! -x host/bin/mig ]; then

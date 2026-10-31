@@ -1,0 +1,10 @@
+# Commands run by the launchd job com.hakios.demo (see com.hakios.demo.plist).
+# rc.jobs.scroll once the system has settled: unlock, then a minute for the start-up work (the widgets' first
+# renderings take four to five cores for seconds: src/cputop.c), then the same gestures twice, so that what is measured
+# is the steady state; cputop beside it says whether it was (RC_JOBS=rc.jobs.steady, touch_lat=1, SECS=200).
+/redwood/bin/cputop 5 &
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 60
+/redwood/bin/rwtouch swipe 0.85 0.5 0.15 0.5 300 wait 1 swipe 0.15 0.5 0.85 0.5 300 wait 1 swipe 0.85 0.5 0.15 0.5 300 wait 1 swipe 0.15 0.5 0.85 0.5 300 wait 1 swipe 0.85 0.5 0.15 0.5 300 wait 1 swipe 0.15 0.5 0.85 0.5 300 wait 2
+/redwood/bin/rwtouch tap 0.615 0.71 wait 5 zigzag 0.5 0.75 0.35 500 6 wait 2 swipe 0.5 0.8 0.5 0.3 150 wait 2 swipe 0.5 0.3 0.5 0.8 150 wait 2 button home wait 3
+/redwood/bin/rwtouch swipe 0.85 0.5 0.15 0.5 300 wait 1 swipe 0.15 0.5 0.85 0.5 300 wait 1 swipe 0.85 0.5 0.15 0.5 300 wait 1 swipe 0.15 0.5 0.85 0.5 300 wait 1 swipe 0.85 0.5 0.15 0.5 300 wait 1 swipe 0.15 0.5 0.85 0.5 300 wait 2
+/redwood/bin/rwtouch tap 0.615 0.71 wait 5 zigzag 0.5 0.75 0.35 500 6 wait 2 swipe 0.5 0.8 0.5 0.3 150 wait 2 swipe 0.5 0.3 0.5 0.8 150 wait 2 button home wait 3

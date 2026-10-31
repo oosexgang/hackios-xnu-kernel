@@ -1,2 +1,14 @@
 #!/bin/sh
-exec /opt/local/bin/gtimeout "$@"
+# GNU timeout for xl: MacPorts' gtimeout when it is there, else the same in perl (timeout SECS COMMAND...: the command killed
+# with TERM after SECS, and the status 124 then, as GNU's)
+[ -x /opt/local/bin/gtimeout ] && exec /opt/local/bin/gtimeout "$@"
+command -v gtimeout >/dev/null 2>&1 && exec gtimeout "$@"
+exec perl -e '
+	my $secs = shift; $secs =~ s/s$//;
+	my $pid = fork() // die "timeout: fork: $!\n";
+	if ($pid == 0) { exec @ARGV or die "timeout: $ARGV[0]: $!\n"; }
+	local $SIG{ALRM} = sub { kill "TERM", $pid; waitpid($pid, 0); exit 124; };
+	alarm $secs;
+	waitpid($pid, 0);
+	exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
+' "$@"

@@ -45,6 +45,7 @@
 #include <kern/clock.h>
 #include <kern/locks.h>
 #include <kern/thread.h>
+#include <kern/thread_call.h>
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
 #include <pexpert/pexpert.h>
@@ -513,11 +514,60 @@ out:
 	thread_terminate(current_thread());
 }
 
+/*
+ * boot-arg press_power=<seconds>: a short press of the power key that many seconds after boot, and another ten
+ * seconds later, given to Darwin as the key's own are (hakios_touch_post): the lock, and the wake, tried with nobody
+ * at the phone. press_power_ms=<ms> is how long each is held (default 150: a tap; 3000 and up is a long press).
+ */
+static uint32_t press_ms = 150, press_left;
+static thread_call_t press_call;
+
+static void
+press_step(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
+{
+	static bool down;
+	uint64_t deadline;
+	char when[64];
+
+	down = !down;
+	now_text(when, sizeof(when), mach_absolute_time());
+	printf("buttons: press_power: power %s at %s\n", down ? "PRESSED (by the test)" : "released (by the test)", when);
+	hakios_touch_post(down ? HAKIOS_BUTTON_DOWN : HAKIOS_BUTTON_UP, HAKIOS_BUTTON_LOCK, 0, 0);
+	if (down) {
+		clock_interval_to_deadline(press_ms, NSEC_PER_MSEC, &deadline);
+	} else if (--press_left > 0) {
+		clock_interval_to_deadline(10, NSEC_PER_SEC, &deadline);
+	} else {
+		return;
+	}
+	thread_call_enter_delayed(press_call, deadline);
+}
+
+static void
+press_power_init(void)
+{
+	uint32_t seconds = 0;
+	uint64_t deadline;
+
+	if (!PE_parse_boot_argn("press_power", &seconds, sizeof(seconds)) || seconds == 0) {
+		return;
+	}
+	PE_parse_boot_argn("press_power_ms", &press_ms, sizeof(press_ms));
+	press_left = 2;
+	press_call = thread_call_allocate(press_step, NULL);
+	clock_interval_to_deadline(seconds, NSEC_PER_SEC, &deadline);
+	thread_call_enter_delayed(press_call, deadline);
+	printf("buttons: press_power: the power key will be pressed for %u ms at %u s and at %u s\n", press_ms, seconds,
+	    seconds + 10);
+}
+
 void
 hakios_buttons_init(void)
 {
 	uint32_t enabled = 0, steps = 5;
 	thread_t thread;
+
+	press_power_init();
 
 	/*
 	 * On with the touch screen (the phone, somebody at it) unless buttons=0 says otherwise: a hand

@@ -88,9 +88,12 @@ ddr_vote	k
 display_probe	k
 epoch	k
 fb_beat	k
+fb_ca_hz	k
 fb_diff	k
 fb_filter	k
 fb_hz	k
+fb_measure	k
+fb_pri	k
 fb_queue	k
 fb_threads	k
 fbheight	k
@@ -111,6 +114,7 @@ glno	u
 glnumbers	u
 glplain	u
 glprecision	u
+glprof	u
 glsb3	u
 glshaders	u
 glshow	u
@@ -118,6 +122,7 @@ glshow_part	u
 glshow_zoom	u
 glskip	u
 glslow	u
+glstill	u
 glsync	u
 gltrace	u
 gltrace_at	u
@@ -198,6 +203,8 @@ net_names	k
 net_trace	k
 pmic	k
 pmic_list	k
+press_power	k
+press_power_ms	k
 privs	k
 rd	kl
 rec_mb	k
@@ -237,6 +244,7 @@ sound_pause	k
 sound_secs	k
 speaker_probe	k
 surf_clear	k
+surf_wrap	k
 surftrace	k
 surftrace_of	k
 switcher_wallpaper	u
@@ -278,6 +286,7 @@ ustacks_count	k
 ustacks_ms	k
 ustacks_threads	k
 ustacks_tname	k
+var_hfs	u
 var_save_ms	k
 var_store	u
 vblur	u

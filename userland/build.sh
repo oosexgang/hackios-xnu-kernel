@@ -192,6 +192,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			{ ${LDID:-ldid} -Ssrc/record_test.entitlements obj/record_test 2>/dev/null ||
 			  echo "build.sh: no ldid: record_test is unsigned, and the system may not let it record"; }
 		$DYN -o obj/cpu_test src/cpu_test.c
+		# which processes take the processors, every few seconds (src/cputop.c; rc.jobs.cputop)
+		$DYN -o obj/cputop src/cputop.c
 		$DYN -framework CoreFoundation -framework IOSurface -o obj/cow_test src/cow_test.c
 		$DYN -framework CoreFoundation -framework CoreGraphics -framework IOSurface -o obj/cg_test src/cg_test.c
 		# what Darwin here believes about Metal, and what CoreImage does without it (src/metal_test.m);
@@ -199,6 +201,8 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 		$DYN -fobjc-arc -Wno-deprecated-declarations -framework Foundation -framework CoreGraphics \
 			-framework CoreImage -framework IOKit -framework Metal -framework OpenGLES \
 			-lMobileGestalt -o obj/metal_test src/metal_test.m
+		# what CoreAnimation and UIKit believe the screen's frame rate is (src/fps_info.m)
+		$DYN -fobjc-arc -framework Foundation -framework QuartzCore -o obj/fps_info src/fps_info.m
 		$DYN -o obj/shm_test src/shm_test.c
 		$DYN -o obj/apfs_mmap_test src/apfs_mmap_test.c
 		$DYN -o obj/vol_ls src/vol_ls.c
@@ -244,7 +248,14 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 			METAL_GPU="-DHAKIOS_METAL_GPU -I$HM/include $HM/out/darwin/libhakios-metal.a -lc++ -framework IOKit"
 			echo "build.sh: HakiosMetal with hakios-metal ($HM)"
 		fi
-		$DYN -bundle -framework Foundation -framework Metal -lobjc -o obj/HakiosMetal src/HakiosMetal.m src/hakios_metallib.c $METAL_GPU
+		# the plug-in itself is hakios-metal's now (plugin/, where it is tested); the copy in src/ is for a tree without it
+		METAL_SRC=src
+		if [ -f $HM/plugin/HakiosMetal.m ]; then
+			METAL_SRC=$HM/plugin
+			echo "build.sh: HakiosMetal from $HM/plugin"
+		fi
+		$DYN -bundle -framework Foundation -framework Metal -lobjc -I$METAL_SRC -o obj/HakiosMetal $METAL_SRC/HakiosMetal.m \
+			$METAL_SRC/hakios_metallib.c $METAL_GPU
 		if [ -n "$GL" ]; then
 			# the OpenGL ES library, and the table of functions that hands CoreAnimation's calls to it
 			# (Mesa says beside the library what it was built from: one from other patches is built again)
@@ -269,6 +280,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	fi
 	cp obj/hello_dyn obj/svc_test obj/surf_test obj/rwtouch obj/mg_test root/bin/
 	[ -f obj/cpu_test ] && cp obj/cpu_test root/bin/        # (a prebuilt/ from before this program has none)
+	[ -f obj/cputop ] && cp obj/cputop root/bin/
 	[ -f obj/cow_test ] && cp obj/cow_test root/bin/
 	[ -f obj/cg_test ] && cp obj/cg_test root/bin/
 	[ -f obj/shm_test ] && cp obj/shm_test root/bin/
@@ -277,6 +289,7 @@ if [ -d $DARWIN/rootfs/usr/lib ]; then
 	[ -f obj/snap_test ] && cp obj/snap_test root/bin/
 	[ -f obj/font_test ] && cp obj/font_test root/bin/
 	[ -f obj/metal_test ] && cp obj/metal_test root/bin/
+	[ -f obj/fps_info ] && cp obj/fps_info root/bin/
 	[ -f obj/net_test ] && cp obj/net_test root/bin/
 	[ -f obj/battery_test ] && cp obj/battery_test root/bin/
 	[ -f obj/keychain_test ] && cp obj/keychain_test root/bin/
@@ -573,6 +586,10 @@ if [ -f $DARWIN/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 	fi
 	mv sysroot/sbin/launchd sysroot/sbin/launchd.darwin
 	cp obj/stage0 sysroot/sbin/launchd
+	# the applications' frame rate: on a phone CoreAnimation holds every process to 60 frames a second unless its
+	# bundle says CADisableMinimumFrameDurationOnPhone, which no application of an iPhone X's system does; the panel
+	# here runs at 120 (IOMFBDisplayRefresh, MiniIOMobileFramebuffer.cpp). New files, not edits: sysroot's are links
+	python3 mkhighrate.py sysroot
 	# the audio DSP's firmware, the phone's own from ../fw-audio (never in the repository), where the kernel reads
 	# it once the root is mounted (drivers/audio/hakios.adsp.c, adsp=1): 20 MB that do not fit beside GL=1 in the small image
 	if [ -f ../fw-audio/adsp.mdt ]; then

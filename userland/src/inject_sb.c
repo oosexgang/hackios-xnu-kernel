@@ -1246,6 +1246,45 @@ load_tweaks(void)
 	}
 }
 
+/*
+ * Boot-arg caenv=NAME=VALUE: CoreAnimation's switches here as in the window server (inject.c), set before QuartzCore
+ * reads them. The ones that hold the frame rate back (CA_MINIMUM_FRAME_DURATION and its kind) are read by the
+ * process that animates as well as by the one that composes, and SpringBoard animates the home screen.
+ */
+static void
+caenv(void)
+{
+	char arguments[1024] = "";
+	size_t size = sizeof(arguments) - 1;
+
+	if (sysctlbyname("kern.bootargs", arguments, &size, NULL, 0) != 0) {
+		return;
+	}
+	for (const char *argument = arguments; (argument = strstr(argument, "caenv=")) != NULL; argument += 6) {
+		char setting[128];
+		size_t length = strcspn(argument + 6, " ");
+		char *equals;
+
+		if ((argument != arguments && argument[-1] != ' ') || length == 0 || length >= sizeof(setting)) {
+			continue;
+		}
+		memcpy(setting, argument + 6, length);
+		setting[length] = 0;
+		if ((equals = strchr(setting, '=')) != NULL) {
+			*equals = 0;
+			/* a fraction is written 0p25: the boot-arguments lose what follows a "." of a number (0.008 came as 0) */
+			for (char *point = equals + 1; *point != 0; point++) {
+				if (*point == 'p' && point > equals + 1 && point[-1] >= '0' && point[-1] <= '9' && point[1] >= '0' && point[1] <= '9') {
+					*point = '.';
+					break;
+				}
+			}
+			setenv(setting, equals + 1, 1);
+			say("hakios: caenv: %s=%s for SpringBoard\n", setting, equals + 1);
+		}
+	}
+}
+
 __attribute__((constructor))
 static void
 hakios_springboard_init(void)
@@ -1272,6 +1311,7 @@ hakios_springboard_init(void)
 		});
 		return;
 	}
+	caenv();
 	/*
 	 * The tweaks of the package manager's prefix, if one is installed: ElleKit's loader
 	 * (/var/jb/usr/lib/TweakLoader.dylib) reads /var/jb/usr/lib/TweakInject and opens the tweaks

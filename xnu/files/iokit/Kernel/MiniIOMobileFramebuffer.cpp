@@ -150,8 +150,23 @@ static TUNABLE(uint32_t, gDiff, "fb_diff", 0);
  * little crooked, here and there and never in the same places twice. By default every pixel of the
  * panel is worked out from the four of the picture around where it falls (bilinear).
  */
-static TUNABLE(uint32_t, gFilter, "fb_filter", 1);
+static TUNABLE(uint32_t, gFilter, "fb_filter", 2);
+/*
+ * fb_filter=2 (the default): nearest neighbour while frames come, bilinear once they stop. Bilinear costs: a frame
+ * took 3.6 ms to scale onto the panel as a rule and 11 ms for one in ten, at any priority (fb_pri), against 1.7 and
+ * 4.3 by nearest neighbour (touch_lat=1, 30 October) -- and at 120 Hz a refresh is 8.3 ms. What nearest neighbour
+ * gets wrong (a column in 25 and a row in 67 left out) does not show while the picture moves; so a frame drawn so is
+ * drawn again, filtered, when no other has come for SETTLE_MS: what stands still on the screen is the bilinear one.
+ */
+#define SETTLE_MS       40
 static TUNABLE(uint32_t, gRefreshHz, "fb_hz", kFBRefreshHz);
+/*
+ * Boot-arg fb_ca_hz=N: the refresh rate told to CoreAnimation (IOMFBDisplayRefresh) when it is not to be fb_hz's. On
+ * this system CoreAnimation draws at half the rate it is told unless something asks it for more: told 120 it gave 60
+ * (tools/frames.py: frames every 16.7 ms, with or without CADisableMinimumFrameDurationOnPhone, CA_FORCE_120HZ and
+ * CA_ENABLE_HIGH_FRAME_RATE_RESTRICTION=0, 30 October). The refreshes themselves still come at fb_hz.
+ */
+static TUNABLE(uint32_t, gCARefreshHz, "fb_ca_hz", 0);
 static TUNABLE(uint32_t, gOnTheBeat, "fb_beat", 1);
 /*
  * Boot-arg fb_threads=N (1 to 8): so many processors scale a frame onto the panel together (see
@@ -159,6 +174,25 @@ static TUNABLE(uint32_t, gOnTheBeat, "fb_beat", 1);
  * to 10 (the phone, 15 October; fb_threads=1 is how it was).
  */
 static TUNABLE(uint32_t, gThreads, "fb_threads", 3);
+/*
+ * Boot-arg fb_pri=N: the scheduling priority of the threads that put frames on the panel (the presenter and its
+ * helpers); 0 is the kernel's default for its threads. By default 92 (BASEPRI_PREEMPT): at the kernel's they lost the
+ * processors to the window server's own real-time threads under load, and a frame took 3.6 ms to put on the panel
+ * as a rule but 10.9 for one in ten (touch_lat=1, 30 October), more than the whole of a refresh at 120 Hz.
+ */
+static TUNABLE(uint32_t, gThreadPriority, "fb_pri", 92);
+extern "C" kern_return_t kernel_thread_start_priority(thread_continue_t continuation, void * parameter, integer_t priority,
+    thread_t * new_thread);
+
+/* a thread of the panel's, at fb_pri */
+static kern_return_t
+panel_thread_start(thread_continue_t continuation, void * parameter, thread_t * thread)
+{
+	if (gThreadPriority >= 1 && gThreadPriority <= 95) {
+		return kernel_thread_start_priority(continuation, parameter, (integer_t) gThreadPriority, thread);
+	}
+	return kernel_thread_start(continuation, parameter, thread);
+}
 #define SWAP_QUEUE              2                       /* frames that may wait for the panel at most (fb_queue) */
 static TUNABLE(uint32_t, gQueue, "fb_queue", 2);
 static inline unsigned
@@ -297,6 +331,7 @@ public:
 	uint64_t        fBeat;                  /* the beat the last frame was shown on */
 	uint64_t        fReady;                 /* when the last frame was ready to be shown */
 	uint32_t        fStatOnBeat;            /* frames that waited for a refresh, and for how long together */
+	uint32_t        fStatSettled;           /* frames drawn again, filtered, once they stood still (fb_filter=2) */
 	uint64_t        fStatBeatWait;
 	uint32_t        fStatSurfaces[8];       /* the first different surfaces the bottom layer was given */
 	uint32_t        fStatHeld, fStatLost;   /* swaps that waited for the one before; that gave up waiting */
@@ -328,9 +363,12 @@ public:
 
 	virtual bool start(IOService * provider) APPLE_KEXT_OVERRIDE;
 	void publishModes(void);
+	void publishRefresh(void);
 	MiniIOSurface * defaultSurface(void);
 	void present(const uint8_t * swap);
 	void show(const uint8_t * swap, MiniIOSurface ** surfaces);
+	void settle(const uint8_t * swap, MiniIOSurface ** surfaces);
+	bool fSettling;                 /* drawing the last frame again, filtered (fb_filter=2) */
 	void presenter(void);
 	static void presenterMain(void * self, wait_result_t result);
 	void reportFrameTimes(void);
@@ -368,6 +406,39 @@ setNumber(OSDictionary * dict, const char * key, uint64_t value)
  */
 #define kFBTimingID     1
 #define kFBColorID      1
+
+/*
+ * The refresh the window server clocks its frames by: the property IOMFBDisplayRefresh, a dictionary of the shortest
+ * interval between refreshes, the longest, and the step between them (QuartzCore, windowserver-apple-display.cpp:
+ * displayMinRefreshInterval, displayRefreshStepMachTime; CoreMedia's FPSupport: displayMaxRefreshInterval,
+ * displayRefreshStep). Without it CoreAnimation takes a built-in panel for a 60 Hz one whatever its timing says: the
+ * mode it makes is "internal_panel (fixed)" at 60, UIScreen's maximumFramesPerSecond is 60, and frames came at 60 on
+ * the 120 Hz panel (userland/src/fps_info.m, 30 October).
+ * The intervals are in units of 2^-32 of a second (32.32 fixed point), not in mach_absolute_time's: given 1/120 s in
+ * the phone's ticks (160000 of 19.2 MHz) CoreAnimation answered a refresh rate of 26844 a second, which is
+ * 2^32 / 160000. Only the step whose name says MachTime is in ticks. This panel does not vary its rate, so all of
+ * them are the one interval, fb_hz's.
+ */
+void
+IOMobileFramebuffer::publishRefresh(void)
+{
+	OSDictionary * refresh = OSDictionary::withCapacity(4);
+	uint32_t told = gCARefreshHz >= 1 && gCARefreshHz <= 480 ? gCARefreshHz : refreshHz();
+	uint64_t interval = (1ULL << 32) / told, ticks;
+
+	if (refresh == NULL) {
+		return;
+	}
+	nanoseconds_to_absolutetime(NSEC_PER_SEC / told, &ticks);
+	setNumber(refresh, "displayMinRefreshInterval", interval);
+	setNumber(refresh, "displayMaxRefreshInterval", interval);
+	setNumber(refresh, "displayRefreshStep", interval);
+	setNumber(refresh, "displayRefreshStepMachTime", ticks);
+	setProperty("IOMFBDisplayRefresh", refresh);
+	refresh->release();
+	IOLog("MiniIOMobileFramebuffer: IOMFBDisplayRefresh: %u Hz (the panel: %u), an interval of %llu (2^-32 s), %llu ticks\n",
+	    told, refreshHz(), interval, ticks);
+}
 
 void
 IOMobileFramebuffer::publishModes(void)
@@ -412,6 +483,7 @@ IOMobileFramebuffer::publishModes(void)
 
 	setProperty("TimingElements", timings);
 	setProperty("ColorElements", colors);
+	publishRefresh();
 	OSSafeReleaseNULL(timings);
 	OSSafeReleaseNULL(colors);
 	OSSafeReleaseNULL(timing);
@@ -438,7 +510,7 @@ IOMobileFramebuffer::start(IOService * provider)
 	}
 	fLock = IOLockAlloc();
 	fSwapLock = IOLockAlloc();
-	if (kernel_thread_start(&IOMobileFramebuffer::presenterMain, this, &thread) != KERN_SUCCESS) {
+	if (panel_thread_start(&IOMobileFramebuffer::presenterMain, this, &thread) != KERN_SUCCESS) {
 		IOLog("MiniIOMobileFramebuffer: no thread to put frames on the panel with\n");
 		return false;
 	}
@@ -447,7 +519,7 @@ IOMobileFramebuffer::start(IOService * provider)
 	fThreads = gThreads >= 1 && gThreads <= 8 ? gThreads : 1;
 	fHelperLock = IOLockAlloc();
 	for (unsigned i = 0; i + 1 < fThreads; i++) {
-		if (kernel_thread_start(&IOMobileFramebuffer::helperMain, this, &thread) != KERN_SUCCESS) {
+		if (panel_thread_start(&IOMobileFramebuffer::helperMain, this, &thread) != KERN_SUCCESS) {
 			fThreads = i + 1;
 			break;
 		}
@@ -791,7 +863,7 @@ IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int
 	int32_t sx = src[0], sy = src[1], sw = src[2], sh = src[3];
 	int32_t dx = dst[0], dy = dst[1], dw = dst[2], dh = dst[3];
 	int32_t px0, py0, px1, py1, cx0, cx1;
-	bool filter = gFilter != 0;
+	bool filter = gFilter == 1 || (gFilter == 2 && fSettling);
 	RowJob job;
 
 	if (sw <= 0 || sh <= 0) {
@@ -1004,24 +1076,77 @@ void
 IOMobileFramebuffer::presenter(void)
 {
 	static uint8_t swap[SWAP_SIZE];         /* (one thread) */
-	MiniIOSurface * surfaces[SWAP_LAYERS];
+	MiniIOSurface * surfaces[SWAP_LAYERS] = { NULL };
+	bool unsettled = false;                 /* the frame on the panel was drawn unfiltered, and its surfaces are held */
 
 	for (;;) {
 		IOLockLock(fSwapLock);
 		while (fSwapsWaiting == 0) {
-			IOLockSleep(fSwapLock, fSwap, THREAD_UNINT);
+			uint64_t deadline;
+
+			if (!unsettled) {
+				IOLockSleep(fSwapLock, fSwap, THREAD_UNINT);
+				continue;
+			}
+			clock_interval_to_deadline(SETTLE_MS, NSEC_PER_MSEC, &deadline);
+			if (IOLockSleepDeadline(fSwapLock, fSwap, deadline, THREAD_UNINT) == THREAD_TIMED_OUT && fSwapsWaiting == 0) {
+				IOLockUnlock(fSwapLock);
+				settle(swap, surfaces);
+				unsettled = false;
+				IOLockLock(fSwapLock);
+			}
 		}
+		IOLockUnlock(fSwapLock);
+		/* the frame before is done with now, settled or not */
+		for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
+			if (surfaces[layer] != NULL) {
+				MiniIOSurfaceDrop(surfaces[layer]);
+				surfaces[layer] = NULL;
+			}
+		}
+		IOLockLock(fSwapLock);
 		memcpy(swap, fSwap[fSwapFirst], SWAP_SIZE);
 		memcpy(surfaces, fSwapSurfaces[fSwapFirst], sizeof(surfaces));
 		IOLockUnlock(fSwapLock);
 		show(swap, surfaces);
-		for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
-			if (surfaces[layer] != NULL) {
-				MiniIOSurfaceDrop(surfaces[layer]);
+		unsettled = gFilter == 2;
+		if (!unsettled) {
+			for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
+				if (surfaces[layer] != NULL) {
+					MiniIOSurfaceDrop(surfaces[layer]);
+					surfaces[layer] = NULL;
+				}
 			}
 		}
 		MiniIOSurfaceClearKept();               /* (the next frame is some milliseconds away) */
 	}
+}
+
+/*
+ * The frame on the panel once more, filtered (fb_filter=2): the same layers from the same surfaces where show() put
+ * them, nothing else (no turn to wait for, no swap to hand on, nothing counted). Its surfaces were held since.
+ */
+void
+IOMobileFramebuffer::settle(const uint8_t * swap, MiniIOSurface ** surfaces)
+{
+	int32_t src[4], dst[4];
+
+	if (!fGraphics) {
+		return;
+	}
+	fSettling = true;
+	for (unsigned layer = 0; layer < SWAP_LAYERS; layer++) {
+		MiniIOSurface * s = surfaces[layer];
+
+		if (s == NULL || s->info.bytesPerElement != 4 || s->info.planeCount != 0) {
+			continue;
+		}
+		memcpy(src, swap + SWAP_SOURCE(layer), sizeof(src));
+		memcpy(dst, swap + SWAP_DEST(layer), sizeof(dst));
+		drawLayer(s, src, dst);
+	}
+	fSettling = false;
+	fStatSettled++;
 }
 
 /* A swap's surfaces onto the panel, once the GPU is done with them. */
@@ -1171,10 +1296,10 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		absolutetime_to_nanoseconds(fStatBeatWait, &beat);
 		IOLog("MiniIOMobileFramebuffer: %u frames in %llu ms (%llu a second), %llu us each in the driver, after %llu us "
 		    "waiting for the GPU and, %u of them, %llu us for the next refresh; %u swaps waited for the frame before, "
-		    "%u gave up; %u swaps came a refresh late themselves\n", fStatFrames, nanos / NSEC_PER_MSEC,
+		    "%u gave up; %u swaps came a refresh late themselves; %u frames drawn again filtered\n", fStatFrames, nanos / NSEC_PER_MSEC,
 		    fStatFrames * NSEC_PER_SEC / nanos, drawing / fStatFrames / NSEC_PER_USEC,
 		    waiting / fStatFrames / NSEC_PER_USEC, fStatOnBeat, fStatOnBeat ? beat / fStatOnBeat / NSEC_PER_USEC : 0,
-		    fStatHeld, fStatLost, fStatSwapsLate);
+		    fStatHeld, fStatLost, fStatSwapsLate, fStatSettled);
 		fStatSwapsLate = 0;
 		for (different = 0; different < 8 && fStatSurfaces[different] != 0; different++) {
 		}
@@ -1190,7 +1315,7 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			    fStatSurfaces[4], made, making, again, freed, freeing);
 		}
 		bzero(fStatSurfaces, sizeof(fStatSurfaces));
-		fStatHeld = fStatLost = fStatOnBeat = 0;
+		fStatHeld = fStatLost = fStatOnBeat = fStatSettled = 0;
 		fStatWaiting = fStatBeatWait = 0;
 		reportFrameTimes();
 		if (fDiff) {
@@ -1371,7 +1496,12 @@ IOMobileFramebufferUserClient::vsync(void)
 		 * only then lets go of the old one, so the port in `ref` cannot be released while it is sent to
 		 * (the send does not wait: a full queue drops the message)
 		 */
-		sendAsyncResult64WithOptions(ref, kIOReturnSuccess, args, 6, kIOUserNotifyOptionCanDrop);
+		IOReturn sent = sendAsyncResult64WithOptions(ref, kIOReturnSuccess, args, 6, kIOUserNotifyOptionCanDrop);
+		if (gTouchLat) {
+			/* "tl: y COUNT due US at US SENT": the refresh told to the window server, when it was due, when it went, and
+			 * whether it went (0) or was dropped on a full queue -- for the window server's idle gaps (tools/frames.py) */
+			hakios_tl("tl: y %llu due %llu at %llu %#x\n", fVSyncCount, micros(now), micros(mach_absolute_time()), sent);
+		}
 	}
 	IOLockUnlock(fLock);
 }

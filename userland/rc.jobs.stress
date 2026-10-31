@@ -1,0 +1,25 @@
+# Commands run by the launchd job com.hakios.demo (see com.hakios.demo.plist).
+# Metal, then frame pacing and stability under use, with nobody at the phone (RC_JOBS=rc.jobs.stress, gpu=1 metal=1,
+# about 9 minutes): metal_test (as rc.jobs.metal); unlock; the page swipes, Search, Control Center and Settings of
+# rc.jobs.fps three times; then the applications of rc.jobs.tour, each opened for 20 seconds and closed. A hang under
+# use was seen twice by hand (30 October); this brings it out again with the log fetched every second (XL_FOLLOW=1).
+/redwood/bin/rwtouch wait 15
+/redwood/bin/rwtouch wait 25
+/redwood/bin/metal_test
+/redwood/bin/fps_info
+/redwood/bin/rwtouch wait 26 swipe 0.5 0.985 0.5 0.3 200 wait 30
+/redwood/bin/rwtouch swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 2 swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 3
+/redwood/bin/rwtouch swipe 0.5 0.4 0.5 0.7 300 wait 3 button home wait 3 swipe 0.92 0.003 0.92 0.5 300 wait 3 button home wait 3
+/redwood/bin/rwtouch tap 0.615 0.71 wait 3 swipe 0.5 0.8 0.5 0.3 150 wait 3 swipe 0.5 0.3 0.5 0.8 150 wait 3 swipe 0.5 0.995 0.5 0.55 150 wait 3
+/redwood/bin/rwtouch swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 2 swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 3
+/redwood/bin/rwtouch swipe 0.5 0.4 0.5 0.7 300 wait 3 button home wait 3 swipe 0.92 0.003 0.92 0.5 300 wait 3 button home wait 3
+/redwood/bin/rwtouch tap 0.615 0.71 wait 3 swipe 0.5 0.8 0.5 0.3 150 wait 3 swipe 0.5 0.3 0.5 0.8 150 wait 3 swipe 0.5 0.995 0.5 0.55 150 wait 3
+/redwood/bin/rwtouch swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 2 swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 3
+/redwood/bin/rwtouch swipe 0.5 0.4 0.5 0.7 300 wait 3 button home wait 3 swipe 0.92 0.003 0.92 0.5 300 wait 3 button home wait 3
+/redwood/bin/rwtouch tap 0.615 0.71 wait 3 swipe 0.5 0.8 0.5 0.3 150 wait 3 swipe 0.5 0.3 0.5 0.8 150 wait 3 swipe 0.5 0.995 0.5 0.55 150 wait 3
+/redwood/bin/rwtouch tap 0.15 0.475 wait 20 button home wait 5 tap 0.385 0.475 wait 20 button home wait 5 tap 0.615 0.475 wait 20 button home wait 5 tap 0.845 0.475 wait 20 button home wait 5
+/redwood/bin/rwtouch tap 0.15 0.59 wait 20 button home wait 5 tap 0.385 0.59 wait 20 button home wait 5 tap 0.615 0.59 wait 20 button home wait 5 tap 0.845 0.59 wait 20 button home wait 5
+/redwood/bin/rwtouch tap 0.15 0.71 wait 20 button home wait 5 tap 0.385 0.71 wait 20 button home wait 5 tap 0.615 0.71 wait 20 button home wait 5
+/redwood/bin/rwtouch tap 0.15 0.925 wait 20 button home wait 5 tap 0.615 0.925 wait 20 button home wait 5 tap 0.845 0.925 wait 20 button home wait 5
+/bin/ps -A
+/usr/bin/vm_stat

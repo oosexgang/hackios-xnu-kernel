@@ -1,0 +1,7 @@
+# Commands run by the launchd job com.hakios.demo (see com.hakios.demo.plist).
+# Frame rate of applications opening and closing (RC_JOBS=rc.jobs.apps, touch_lat=1, a run of about 110 s, short enough
+# for the log to keep it all): unlock; five applications of the first page each opened, left 4 s, closed with the home
+# button, twice over. The zoom in and out with the blurred backdrop is what this measures (tools/frames.py).
+/redwood/bin/rwtouch wait 30 swipe 0.5 0.985 0.5 0.3 200 wait 8
+/redwood/bin/rwtouch tap 0.15 0.36 wait 4 button home wait 3 tap 0.385 0.36 wait 4 button home wait 3 tap 0.615 0.36 wait 4 button home wait 3 tap 0.845 0.36 wait 4 button home wait 3 tap 0.615 0.71 wait 4 button home wait 3
+/redwood/bin/rwtouch tap 0.15 0.36 wait 4 button home wait 3 tap 0.385 0.36 wait 4 button home wait 3 tap 0.615 0.36 wait 4 button home wait 3 tap 0.845 0.36 wait 4 button home wait 3 tap 0.615 0.71 wait 4 button home wait 3
